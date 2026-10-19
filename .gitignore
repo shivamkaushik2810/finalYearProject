@@ -1,2 +1,30 @@
+# Python environment and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+.streamlit/
 
-ai-attendance-project-app/
+# Keep project source tracked
+
+# Local logs and assistant configuration
+*.log
+*.log.*
+.agents/
+.claude/
+
+# Local secrets
+.streamlit/secrets.toml
+
+# Streamlit agent skills
+.agents/skills/developing-with-streamlit
+.claude/skills/developing-with-streamlit
+
+# Python virtual environments
+.venv/
+.venv-backup/
