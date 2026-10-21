@@ -3,7 +3,6 @@ streamlit
 numpy
 pandas
 joblib
-opencv-python-headless
 
 # FACE RECOGNITION
 scikit-learn
@@ -22,3 +21,5 @@ resemblyzer
 reportlab
 anthropic
 vl-convert-python
+ultralytics
+opencv-python==4.10.0.84

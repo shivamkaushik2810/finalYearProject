@@ -1,3 +1,4 @@
+from src.components.filters import subject_label
 import re
 import time
 import streamlit as st
@@ -143,7 +144,7 @@ def teacher_tab_ai_insights(subjects, teacher_id):
         st.info("Create a subject first to see AI insights.")
         return
 
-    subject_options = {f"{s['name']} - {s['subject_code']}": s for s in subjects}
+    subject_options = {subject_label(s): s for s in subjects}
     selected_label = st.selectbox("Select Subject", list(subject_options.keys()))
 
     if selected_label:
@@ -188,196 +189,24 @@ def teacher_tab_ai_insights(subjects, teacher_id):
 
 def teacher_tab_take_attendance():
     teacher_id = st.session_state.teacher_data['teacher_id']
-    st.header('Take AI Attendance')
-
-    if 'attendance_images' not in st.session_state:
-        st.session_state.attendance_images = []
+    st.header('Take Attendance')
 
     subjects = get_teacher_subjects(teacher_id)
-
     if not subjects:
         st.warning('You havent created any subjects yet! Please create one to begin!')
         return
 
-    subject_options = {f"{s['name']} - {s['subject_code']}": s for s in subjects}
+    subject_options = {subject_label(s): s for s in subjects}
+    selected_label = st.selectbox('Select Subject', options=list(subject_options.keys()),
+                                  key='ai_insights_subject')
 
-    col1, col2 = st.columns([3, 1], vertical_alignment='bottom')
-
-    with col1:
-        selected_subject_label = st.selectbox(
-            'Select Subject',
-            options=list(subject_options.keys()),
-            key='ai_insights_subject'
-        )
-
-    with col2:
-        if st.button('Add Photos', type='primary', icon=':material/photo_prints:', width='stretch'):
-            add_photos_dialog()
-
-    selected_subject = subject_options[selected_subject_label]
-    selected_subject_id = selected_subject["subject_id"]
-
-    st.divider()
-
-    if st.session_state.attendance_images:
-        st.header('Added Photos')
-        gallery_cols = st.columns(4)
-
-        for idx, img in enumerate(st.session_state.attendance_images):
-            with gallery_cols[idx % 4]:
-                st.image(img, width='stretch', caption=f'Photo {idx + 1}')
-
-    has_photos = bool(st.session_state.attendance_images)
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        if st.button('Clear all photos', width='stretch', type='tertiary', icon=':material/delete:', disabled=not has_photos):
-            st.session_state.attendance_images = []
-            st.rerun()
-
-    with c2:
-        if st.button('Run Face Analysis', width='stretch', type='secondary', icon=':material/analytics:', disabled=not has_photos):
-            with st.spinner('Deep scanning classroom photos...'):
-                all_detected_ids = {}
-                best_conf = {}
-                pending = {}
-
-                for idx, img in enumerate(st.session_state.attendance_images):
-                    img_np = np.array(img.convert('RGB'))
-
-                    is_good, face_count = show_image_quality_check(img_np)
-
-                    # Anti-spoofing is meaningful for a single-face capture,
-                    # not for a group classroom photo.
-                    if face_count == 1:
-                        if not show_liveness_check(img_np):
-                            st.warning(f"Photo {idx + 1}: Spoofing detected! Skipping this photo.")
-                            continue
-
-                    detected, _, _, encs = predict_attendance_with_encodings(img_np)
-
-                    for sid, conf in (detected or {}).items():
-                        all_detected_ids.setdefault(sid, []).append(f"Photo {idx + 1}")
-                        c = conf if isinstance(conf, (int, float)) and not isinstance(conf, bool) else 0.0
-                        best_conf[sid] = max(best_conf.get(sid, 0.0), float(c))
-                        if sid in encs and (sid not in pending or c > pending[sid][0]):
-                            pending[sid] = (float(c), encs[sid])
-
-                st.session_state.pending_face_samples = pending
-                enrolled_res = supabase.table('subject_students').select("*, students(*)").eq('subject_id', selected_subject_id).execute()
-                enrolled_students = enrolled_res.data
-
-                if not enrolled_students:
-                    st.warning('No students enrolled in this course')
-                else:
-                    results, attendance_to_log = [], []
-                    current_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-                    for node in enrolled_students:
-                        student = node['students']
-                        sources = all_detected_ids.get(student['student_id'], [])
-                        is_present = len(sources) > 0
-
-                        results.append({
-                            "Name": student['name'],
-                            "ID": student['student_id'],
-                            "Source": ", ".join(sources) if is_present else "-",
-                            "Status": "✅ Present" if is_present else "❌ Absent"
-                        })
-
-                        attendance_to_log.append({
-                            'student_id': student['student_id'],
-                            'subject_id': selected_subject_id,
-                            'timestamp': current_timestamp,
-                            'is_present': bool(is_present),
-                            'confidence_score': round(best_conf[student['student_id']], 2) if is_present else None
-                        })
-
-                    attendance_result_dialog(pd.DataFrame(results), attendance_to_log)
-
-    with c3:
-        if st.button('Use Voice Attendance', type='primary', width='stretch', icon=':material/mic:'):
-            voice_attendance_dialog(selected_subject_id)
-
-    st.divider()
-    teacher_qr_panel(selected_subject, teacher_id)
+    from src.components.attendance_hub import attendance_hub
+    attendance_hub(subject_options[selected_label], teacher_id)
 
 
 def teacher_tab_enrolled_students():
-    """Show enrolled students list for each subject"""
-    teacher_id = st.session_state.teacher_data['teacher_id']
-    subjects   = get_teacher_subjects(teacher_id)
-
-    st.header("👥 Enrolled Students")
-
-    if not subjects:
-        st.info("No subjects created yet. Create a subject first.")
-        return
-
-    subject_options = {f"{s['name']} - {s['subject_code']}": s for s in subjects}
-    selected_label  = st.selectbox("Select Subject", list(subject_options.keys()), key='enroll_list_sub')
-
-    if selected_label:
-        selected_sub = subject_options[selected_label]
-        sid          = selected_sub['subject_id']
-
-        res = supabase.table('subject_students')\
-            .select('*, students(student_id, name, email, roll_no, section, parent_email)')\
-            .eq('subject_id', sid).execute()
-
-        enrolled = [n['students'] for n in (res.data or []) if n.get('students')]
-
-        # ONE query for all students' attendance (was one query per student)
-        att_stats = get_subject_attendance_stats(sid)
-
-        st.divider()
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Enrolled", len(enrolled))
-        with col2:
-            with_email = sum(1 for s in enrolled if s.get('email'))
-            st.metric("With Email", with_email)
-        with col3:
-            with_parent = sum(1 for s in enrolled if s.get('parent_email'))
-            st.metric("With Parent Email", with_parent)
-
-        st.divider()
-
-        if not enrolled:
-            st.warning("No students enrolled in this subject yet.")
-            return
-
-        st.subheader(f"📋 Student List — {selected_sub['name']} ({selected_sub['subject_code']})")
-
-        search = st.text_input("🔍 Search student", placeholder="Type name or roll no...")
-
-        filtered = enrolled
-        if search:
-            q = search.lower()
-            filtered = [s for s in enrolled if
-                        q in (s.get('name') or '').lower() or
-                        q in (s.get('roll_no') or '').lower()]
-
-        for i, student in enumerate(filtered):
-            with st.container(border=True):
-                col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
-                with col1:
-                    st.write(f"**{i+1}. {student.get('name', 'Unknown')}**")
-                    st.caption(f"Roll No: {student.get('roll_no', 'N/A')} | Section: {student.get('section', 'N/A')}")
-                with col2:
-                    email = student.get('email', '')
-                    st.write(f"📧 {email or 'No email'}")
-                with col3:
-                    parent = student.get('parent_email', '')
-                    st.write(f"👨‍👩‍👧 {parent or 'No parent email'}")
-                with col4:
-                    s = att_stats.get(student['student_id'], {'total': 0, 'present': 0})
-                    total, present = s['total'], s['present']
-                    pct   = round((present / total) * 100) if total > 0 else 0
-                    color = "🟢" if pct >= 75 else "🟡" if pct >= 50 else "🔴"
-                    st.write(f"{color} {present}/{total} ({pct}%)")
-
+    from src.components.class_filters_ui import teacher_tab_enrolled_students as _impl
+    _impl()
 
 def teacher_tab_manage_subjects():
     teacher_id = st.session_state.teacher_data['teacher_id']
@@ -406,7 +235,7 @@ def teacher_tab_manage_subjects():
             subject_card(
                 name=sub['name'],
                 code=sub['subject_code'],
-                section=sub['section'],
+                section=sub['section'], course=sub.get('course'), year=sub.get('year'),
                 stats=stats,
                 footer_callback=share_btn
             )
@@ -415,49 +244,8 @@ def teacher_tab_manage_subjects():
 
 
 def teacher_tab_attendance_records():
-    st.header('Attendance Records')
-
-    teacher_id = st.session_state.teacher_data['teacher_id']
-    records = get_attendance_for_teacher(teacher_id)
-
-    if not records:
-        st.info("No attendance records yet.")
-        return
-
-    data = []
-    for r in records:
-        ts = r.get('timestamp')
-        data.append({
-            "ts_group": ts.split(".")[0] if ts else None,
-            "Time": datetime.fromisoformat(ts).strftime("%Y-%m-%d %I:%M %p") if ts else "N/A",
-            "Subject": r['subjects']['name'],
-            "Subject Code": r['subjects']['subject_code'],
-            "is_present": bool(r.get('is_present', False))
-        })
-
-    df = pd.DataFrame(data)
-
-    summary = (
-        df.groupby(['ts_group', 'Time', 'Subject', 'Subject Code'])
-        .agg(
-            Present_Count=('is_present', 'sum'),
-            Total_Count=('is_present', 'count')
-        ).reset_index()
-    )
-
-    summary['Attendance Stats'] = (
-        "✅ " + summary['Present_Count'].astype(str) + " /"
-        + summary['Total_Count'].astype(str) + ' Students'
-    )
-
-    display_df = (summary.sort_values(by='ts_group', ascending=False)
-                  [['Time', 'Subject', 'Subject Code', 'Attendance Stats']])
-
-    st.dataframe(display_df, width='stretch', hide_index=True)
-
-    st.divider()
-    teacher_attendance_corrections(teacher_id)
-
+    from src.components.class_filters_ui import teacher_tab_attendance_records as _impl
+    _impl()
 
 def login_teacher(username, password):
     if not username or not password:

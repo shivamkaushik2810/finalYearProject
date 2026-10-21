@@ -1,3 +1,4 @@
+from src.components.filters import subject_label
 import datetime
 
 import streamlit as st
@@ -16,7 +17,7 @@ def show_teacher_marks(subjects, teacher_id):
         st.info("No subjects created yet. Create a subject first.")
         return
 
-    subject_options = {f"{s['name']} - {s['subject_code']}": s for s in subjects}
+    subject_options = {subject_label(s): s for s in subjects}
     selected_label = st.selectbox("Select Subject", list(subject_options.keys()), key='marks_sub')
     if not selected_label:
         return

@@ -220,7 +220,7 @@ def send_weekly_reports_to_all_parents():
             parent_email = (student.get('parent_email') or '').strip()
             parent_name  = student.get('parent_name') or 'Parent'
 
-            if not parent_email:
+            if not parent_email or parent_email.lower().endswith('@example.com'):
                 continue
 
             if weekly_report_exists(student_id, week_start):

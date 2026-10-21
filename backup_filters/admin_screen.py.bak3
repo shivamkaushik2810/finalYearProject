@@ -1,0 +1,261 @@
+import html
+import pandas as pd
+import streamlit as st
+
+from src.ui.base_layout import style_background_dashboard, style_base_layout
+from src.components.header import header_dashboard
+from src.components.footer import footer_dashboard
+from src.components.timetable import admin_timetable_manager
+from src.components.student_analytics_ui import student_analytics_tab
+from src.components.term_manager import admin_term_manager
+from src.components.child_overview import _classes_needed, REQUIRED_PCT
+from src.database.config import supabase
+from src.database.attendance_status import eligible
+from src.database.db import admin_login, get_teachers_by_status, set_teacher_status
+from src.services.report_export import df_pdf
+from src.services.email_service import _send
+
+
+def admin_screen():
+    style_background_dashboard()
+    style_base_layout()
+    if "admin_data" in st.session_state:
+        admin_dashboard()
+    else:
+        admin_login_screen()
+
+
+def _go_home():
+    st.query_params.clear()
+    st.session_state['login_type'] = None
+
+
+def admin_login_screen():
+    c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
+    with c1:
+        header_dashboard()
+    with c2:
+        if st.button("Go back to Home", type='secondary', key='loginbackbtn'):
+            _go_home()
+            st.rerun()
+
+    st.header('Admin Login', text_alignment='center')
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login", type="primary", icon=":material/passkey:", shortcut="control+enter"):
+        admin, msg = admin_login(username, password)
+        if admin:
+            st.session_state.admin_data = {'id': admin['id'], 'name': admin.get('name') or admin['username'],
+                                           'username': admin['username']}
+            st.session_state.user_role = 'admin'
+            st.session_state.is_logged_in = True
+            st.rerun()
+        else:
+            st.error(msg)
+    footer_dashboard()
+
+
+# ───────────────────────── helpers ─────────────────────────
+
+def _all_rows(table, select, order=None, page=1000):
+    """Reads every row (PostgREST returns at most 1000 per request)."""
+    out, start = [], 0
+    while True:
+        q = supabase.table(table).select(select)
+        for col in (order or []):
+            q = q.order(col)
+        rows = q.range(start, start + page - 1).execute().data or []
+        out.extend(rows)
+        if len(rows) < page:
+            break
+        start += page
+    return out
+
+
+@st.cache_data(ttl=300, show_spinner="Loading data (cached for 5 minutes)...")
+def _cached_rows(table, select, order=()):
+    return _all_rows(table, select, list(order))
+
+
+def _download_pair(df, title, subtitle, base, key):
+    c1, c2 = st.columns(2)
+    c1.download_button("⬇️ CSV", df.to_csv(index=False).encode("utf-8"),
+                       file_name=f"{base}.csv", mime="text/csv", key=f"{key}_csv")
+    c2.download_button("⬇️ PDF", df_pdf(df, title, subtitle),
+                       file_name=f"{base}.pdf", mime="application/pdf", key=f"{key}_pdf")
+
+
+def _notify_teacher(t, approved):
+    email = (t.get('email') or '').strip()
+    if not email:
+        return
+    msg = ("Your teacher account has been approved. You can now log in to SnapClass." if approved
+           else "Your teacher account request was not approved. Please contact the administrator.")
+    subject = "✅ SnapClass account approved" if approved else "SnapClass account request update"
+    plain = f"Dear {t['name']},\n\n{msg}\n\nSnapClass Team"
+    body = (f"<p>Dear <b>{html.escape(t['name'])}</b>,</p><p>{html.escape(msg)}</p>"
+            f"<p>SnapClass Team</p>")
+    try:
+        _send(email, subject, body, plain)
+    except Exception as e:
+        print(f"Teacher notification failed: {e}")
+
+
+# ───────────────────────── approvals ─────────────────────────
+
+def _teacher_row(t, actions):
+    with st.container(border=True):
+        cols = st.columns([4] + [1] * len(actions))
+        cols[0].write(f"**{t['name']}** (@{t['username']})")
+        cols[0].caption(t.get('email') or "No email")
+        for col, (label, status, kind) in zip(cols[1:], actions):
+            if col.button(label, key=f"{status}_{t['teacher_id']}", type=kind):
+                set_teacher_status(t['teacher_id'], status)
+                _notify_teacher(t, status == 'approved')
+                st.rerun()
+
+
+def _approvals_tab():
+    pending = get_teachers_by_status('pending')
+    st.subheader(f"Pending requests ({len(pending)})")
+    if not pending:
+        st.info("No pending requests.")
+    for t in pending:
+        _teacher_row(t, [("Approve", "approved", "primary"), ("Reject", "rejected", "secondary")])
+
+    st.divider()
+    approved = get_teachers_by_status('approved')
+    with st.expander(f"Approved teachers ({len(approved)})"):
+        for t in approved:
+            _teacher_row(t, [("Revoke", "rejected", "tertiary")])
+    rejected = get_teachers_by_status('rejected')
+    with st.expander(f"Rejected / revoked ({len(rejected)})"):
+        for t in rejected:
+            _teacher_row(t, [("Approve", "approved", "primary")])
+
+
+# ───────────────────────── overview & reports ─────────────────────────
+
+def _overview_tab():
+    try:
+        subjects = _cached_rows('subjects', 'subject_id, name, subject_code, section, course, year, teacher_id, teachers(name)', ('subject_id',))
+        enrolled = _cached_rows('subject_students', 'subject_id, student_id', ('subject_id', 'student_id'))
+        logs = _cached_rows('attendance_logs', 'subject_id, student_id, is_present, timestamp, status',
+                            ('timestamp', 'subject_id', 'student_id'))
+        students = _cached_rows('students', 'student_id, name, roll_no, section, course, year, parent_email', ('student_id',))
+    except Exception as e:
+        st.error(f"Could not load data: {e}")
+        return
+
+    top = st.columns([5, 1])
+    top[0].caption("Data is cached for 5 minutes for speed. Press Refresh after new attendance is saved.")
+    if top[1].button("Refresh", key="adm_refresh"):
+        st.cache_data.clear()
+        st.rerun()
+
+    def _opts(rows, field):
+        return sorted({str(r[field]).strip() for r in rows if r.get(field) not in (None, '')})
+
+    f1, f2, f3 = st.columns(3)
+    course = f1.selectbox("Course", ["All courses"] + _opts(subjects, 'course'), key="adm_course")
+    year = f2.selectbox("Year", ["All years"] + _opts(subjects, 'year'), key="adm_year")
+    pool = [x for x in subjects
+            if (course == "All courses" or str(x.get('course')) == course)
+            and (year == "All years" or str(x.get('year')) == year)]
+    choice = f3.selectbox("Section", ["All sections"] + _opts(pool, 'section'), key="adm_section")
+    sel = [x for x in pool if choice == "All sections" or x.get('section') == choice]
+    scope = f"{course} | {year if year == 'All years' else 'Year ' + year} | {choice}"
+    ids = {s['subject_id'] for s in sel}
+    logs_f = eligible([l for l in logs if l['subject_id'] in ids])
+    enr_f = [e for e in enrolled if e['subject_id'] in ids]
+
+    present = sum(1 for l in logs_f if l.get('is_present'))
+    avg = round(present / len(logs_f) * 100, 1) if logs_f else 0.0
+    sessions = len({(l['subject_id'], l['timestamp']) for l in logs_f})
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Students", len({e['student_id'] for e in enr_f}))
+    c2.metric("Teachers", len(get_teachers_by_status('approved')))
+    c3.metric("Subjects", len(sel))
+    c4.metric("Sessions", sessions)
+    c5.metric("Avg attendance", f"{avg}%")
+
+    # per-subject table
+    st.subheader("Subject-wise attendance")
+    rows = []
+    for s in sel:
+        sl = [l for l in logs_f if l['subject_id'] == s['subject_id']]
+        sp = sum(1 for l in sl if l.get('is_present'))
+        rows.append({
+            "Subject": s['name'], "Code": s['subject_code'], "Course": s.get('course') or "", "Year": s.get('year') or "", "Section": s.get('section') or "",
+            "Teacher": (s.get('teachers') or {}).get('name', ""),
+            "Enrolled": sum(1 for e in enr_f if e['subject_id'] == s['subject_id']),
+            "Sessions": len({l['timestamp'] for l in sl}),
+            "Attendance %": round(sp / len(sl) * 100, 1) if sl else 0.0,
+        })
+    if rows:
+        df = pd.DataFrame(rows)
+        st.dataframe(df, hide_index=True, width='stretch')
+        _download_pair(df, "Subject-wise Attendance Report", scope, "subject_attendance", "adm_subj")
+    else:
+        st.info("No subjects for this selection.")
+
+    # defaulters
+    st.subheader("Defaulters (all subjects)")
+    thr = st.slider("Attendance threshold (%)", 40, 95, REQUIRED_PCT, 5, key="adm_thr")
+    info = {s['student_id']: s for s in students}
+    agg = {}
+    for l in logs_f:
+        a = agg.setdefault(l['student_id'], [0, 0])
+        a[1] += 1
+        if l.get('is_present'):
+            a[0] += 1
+    drows = []
+    for sid, (p, t) in agg.items():
+        pct = round(p / t * 100, 1)
+        if pct >= thr or sid not in info:
+            continue
+        s = info[sid]
+        drows.append({"Name": s['name'], "Roll No": s.get('roll_no') or "", "Course": s.get('course') or "", "Year": s.get('year') or "", "Section": s.get('section') or "",
+                      "Present/Total": f"{p}/{t}", "Attendance %": pct,
+                      "Classes needed": _classes_needed(p, t, thr), "Parent email": s.get('parent_email') or ""})
+    if not drows:
+        st.success(f"No students below {thr}%.")
+    else:
+        ddf = pd.DataFrame(drows).sort_values("Attendance %")
+        st.warning(f"{len(ddf)} student(s) below {thr}%")
+        st.dataframe(ddf, hide_index=True, width='stretch')
+        _download_pair(ddf, "Defaulters Report", f"Below {thr}% - {scope}", "defaulters", "adm_def")
+
+
+# ───────────────────────── dashboard ─────────────────────────
+
+def admin_dashboard():
+    admin = st.session_state.admin_data
+
+    c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
+    with c1:
+        header_dashboard()
+    with c2:
+        st.subheader(f"Welcome, {admin['name']}")
+        if st.button("Logout", type="secondary", key="loginbackbtn"):
+            del st.session_state.admin_data
+            st.session_state['is_logged_in'] = False
+            _go_home()
+            st.rerun()
+
+    pending_n = len(get_teachers_by_status('pending'))
+    t1, t2, t3, t4, t5 = st.tabs([f"Teacher Approvals ({pending_n})", "Overview & Reports", "Timetable", "Student Analytics", "Academic Terms"])
+    with t1:
+        _approvals_tab()
+    with t2:
+        _overview_tab()
+    with t3:
+        admin_timetable_manager()
+    with t4:
+        student_analytics_tab()
+    with t5:
+        admin_term_manager()
+
+    footer_dashboard()

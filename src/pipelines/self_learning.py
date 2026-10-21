@@ -7,6 +7,7 @@ from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from src.database.config import supabase
+from src.database.students_query import get_students_with_faces
 
 
 MODEL_PATH = "model.pkl"

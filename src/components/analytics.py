@@ -1,3 +1,4 @@
+from src.components.filters import subject_label
 import pandas as pd
 import streamlit as st
 
@@ -178,7 +179,9 @@ def _announcements_tab(subjects, teacher_id):
     options = {f"{s['name']} ({s['subject_code']})": s for s in subjects}
 
     with st.container(border=True):
-        label = st.selectbox("Subject", list(options.keys()), key="ann_subject")
+        label = next((k for k, v in options.items() if v['subject_id'] == st.session_state.get('an_sel_sid')),
+                     list(options.keys())[0])
+        st.caption(f'Posting to: {label}  (change it with the Subject dropdown above)')
         title = st.text_input("Title", max_chars=120, key="ann_title")
         message = st.text_area("Message", max_chars=1000, key="ann_msg")
         if st.button("Post announcement", type="primary", icon=":material/campaign:", key="ann_post"):
@@ -227,24 +230,22 @@ def _announcements_tab(subjects, teacher_id):
 # ───────────────────────── entry point ─────────────────────────
 
 def teacher_analytics_tab(subjects, teacher_id):
+    subjects = [s for s in (subjects or []) if s.get('teacher_id') == teacher_id]
     st.header("📊 Analytics")
     if not subjects:
         st.info("Create a subject first.")
         return
 
-    t_att, t_def, t_marks, t_ann = st.tabs(["Attendance", "Defaulters", "Marks", "Announcements"])
-
-    options = {f"{s['name']} - {s['subject_code']}": s for s in subjects}
-
-    with t_ann:
-        _announcements_tab(subjects, teacher_id)
-
+    options = {subject_label(s): s for s in subjects}
     label = st.selectbox("Subject", list(options.keys()), key="an_subject")
     subject = options[label]
     key = str(subject['subject_id'])
+    st.session_state['an_sel_sid'] = subject['subject_id']
 
     students = _enrolled(subject['subject_id'])
     logs = _logs(subject['subject_id'])
+
+    t_att, t_def, t_marks, t_ann = st.tabs(["Attendance", "Defaulters", "Marks", "Announcements"])
 
     with t_att:
         _attendance_tab(subject, students, logs)
@@ -252,3 +253,5 @@ def teacher_analytics_tab(subjects, teacher_id):
         _defaulters_tab(subject, students, logs, key)
     with t_marks:
         _marks_tab(subject, key)
+    with t_ann:
+        _announcements_tab(subjects, teacher_id)

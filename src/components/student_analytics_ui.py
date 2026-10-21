@@ -8,6 +8,8 @@ import zipfile
 import pandas as pd
 import streamlit as st
 
+from src.database.config import supabase
+
 from src.analytics.student_analytics import (
     AnalyticsConfig, DEFINITIONS, compute_all, subject_summary, export_tables,
     attendance_scenarios, prob_meet_target, build_llm_payload,
@@ -42,42 +44,97 @@ def _log_error(where, e):
 
 # ───────────────────────── entry point ─────────────────────────
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _directory():
+    """Light list of every student's course / year / section (paged past the 1000-row cap)."""
+    rows, start = [], 0
+    while True:
+        chunk = (supabase.table("students").select("student_id, course, year, section")
+                 .order("student_id").range(start, start + 999).execute().data or [])
+        rows.extend(chunk)
+        if len(chunk) < 1000:
+            return rows
+        start += 1000
+
+
+def _n(v):
+    return str(v).strip().lower() if v not in (None, "") else ""
+
+
+def _opts(rows, field):
+    return sorted({str(r[field]).strip() for r in rows if r.get(field) not in (None, "")})
+
+
+MAX_LIST = 300
+
+
 def student_analytics_tab():
     st.header("🎓 Student Analytics")
     st.caption("Every figure is calculated from the database records of the selected student. "
                "Nothing here is sample data. Data may be up to 60 seconds old.")
+    if not st.session_state.get("admin_data"):
+        st.error("Administrator access required.")
+        return
     try:
         sections = adb.get_sections()
+        directory = _directory()
     except PermissionError:
         st.error("Administrator access required.")
         return
     except Exception as e:
         _log_error("sections", e)
-        st.error("Could not load sections. Please try again.")
+        st.error("Could not load the class list. Please try again.")
         return
     if not sections:
         st.info("No students with a section were found.")
         return
 
     c1, c2 = st.columns(2)
-    with c1:
-        section_key = st.selectbox("Section", list(sections.keys()), index=None, placeholder="Select a section",
-                                   format_func=lambda k: f"Section {k} ({sections[k]['count']} students)", key="sa_section")
+    course = c1.selectbox("Course", ["All courses"] + _opts(directory, "course"), key="sa_course")
+    pool = [d for d in directory if course == "All courses" or _n(d.get("course")) == _n(course)]
+    year = c2.selectbox("Year", ["All years"] + _opts(pool, "year"), key="sa_year")
+    pool = [d for d in pool if year == "All years" or _n(d.get("year")) == _n(year)]
+
+    sec_counts = {}
+    for d in pool:
+        k = _n(d.get("section"))
+        if k:
+            sec_counts[k] = sec_counts.get(k, 0) + 1
+    valid = {k: v for k, v in sections.items() if _n(k) in sec_counts}
+
+    c3, c4 = st.columns(2)
+    with c3:
+        section_key = st.selectbox("Section", sorted(valid.keys()), index=None, placeholder="Select a section",
+                                   format_func=lambda k: f"Section {k} ({sec_counts[_n(k)]} students)",
+                                   key=f"sa_section_{course}_{year}")
     if not section_key:
-        st.info("Select a section to begin.")
+        st.info("Select a course, year and section to begin.")
         return
+    with c4:
+        search = st.text_input("Search name or roll number", key=f"sa_search_{section_key}").strip().lower()
+
+    allowed = {d["student_id"] for d in pool if _n(d.get("section")) == _n(section_key)}
     try:
-        students = adb.get_students(section_key)
+        students = [x for x in adb.get_students(section_key) if x["student_id"] in allowed]
     except Exception as e:
         _log_error("students", e)
-        st.error("Could not load students for this section.")
+        st.error("Could not load students for this class.")
         return
-    by_id = {s["student_id"]: s for s in students}
-    with c2:
-        # the key includes the section, so changing the section clears the student selection
-        student_id = st.selectbox("Student", list(by_id.keys()), index=None, placeholder="Select a student",
-                                  format_func=lambda i: f"{by_id[i]['name']} - {by_id[i].get('roll_no') or 'N/A'}",
-                                  key=f"sa_student_{section_key}")
+    if search:
+        students = [x for x in students if search in (x.get("name") or "").lower()
+                    or search in str(x.get("roll_no") or "").lower()]
+    if not students:
+        st.warning("No students match these filters.")
+        return
+    if len(students) > MAX_LIST:
+        st.caption(f"Showing the first {MAX_LIST} of {len(students)} students. Narrow the filters or use the search box.")
+    cy = {d["student_id"]: d for d in directory}
+    by_id = {x["student_id"]: {**x, "course": cy.get(x["student_id"], {}).get("course"),
+                               "year": cy.get(x["student_id"], {}).get("year")} for x in students[:MAX_LIST]}
+
+    student_id = st.selectbox("Student", list(by_id.keys()), index=None, placeholder="Select a student",
+                              format_func=lambda i: f"{by_id[i]['name']} - {by_id[i].get('roll_no') or 'N/A'}",
+                              key=f"sa_student_{section_key}_{course}_{year}_{search}")
     if student_id is None:
         st.info("Select a student to load their analytics.")
         return
@@ -152,7 +209,7 @@ def _render_student(section_key, student_id, student):
     m = compute_all(att_rows, marks_rows, section_rows, [subj_map[i] for i in chosen], student_id, cfg,
                     start=start, end=end, subject_ids=None if all_selected else chosen, exam_types=sel_exam or None, section_agg=section_agg)
 
-    st.markdown(f"### {student['name']}  ·  Roll {student.get('roll_no') or 'N/A'}  ·  Section {section_key}")
+    st.markdown(f"### {student['name']}  ·  Roll {student.get('roll_no') or 'N/A'}  ·  {student.get('course') or ''} Year {student.get('year') or '-'}  ·  Section {section_key}")
     _kpis(m, cfg)
 
     t_over, t_chart, t_stat, t_trend, t_ins, t_exp = st.tabs(

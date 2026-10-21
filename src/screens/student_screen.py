@@ -12,6 +12,7 @@ from src.pipelines.liveness_detection import detect_screen_or_photo, check_face_
 from src.database.db import get_all_students, create_student, get_student_subjects, get_student_attendance, unenroll_student_to_subject
 from src.services.otp_service import send_and_save_otp, verify_otp, is_email_verified, mark_email_verified
 import time
+from src.components.liveness_challenge import run_liveness_challenge
 
 from src.components.dialog_enroll import enroll_dialog
 from src.components.subject_card import subject_card
@@ -96,7 +97,7 @@ def student_dashboard():
                     subject_card(
                         name=sub['name'],
                         code=sub['subject_code'],
-                        section=sub['section'],
+                        section=sub['section'], course=sub.get('course'), year=sub.get('year'),
                         stats=[
                             ('📅', 'Total',    stats['total']),
                             ('✅', 'Attended', stats['attended']),
@@ -105,11 +106,6 @@ def student_dashboard():
                     )
 
     with tab2:
-        col_left, col_right = st.columns([8, 1])
-        with col_right:
-            if st.button('See My Marks', type='secondary', key='see_marks_btn', use_container_width=True):
-                show_student_marks(student_id)
-
         show_student_attendance_list(student_id)
 
     with tab3:
@@ -199,20 +195,33 @@ def student_screen():
                 else:
                     if detected:
                         student_id   = list(detected.keys())[0]
-                        all_students = get_all_students()
-                        student      = next(
-                            (s for s in all_students if s['student_id'] == student_id), None
-                        )
+                        from src.database.students_query import get_student_by_id
+                        student = get_student_by_id(student_id)
                         if student:
-                            st.session_state.is_logged_in = True
-                            st.session_state.user_role    = 'student'
-                            st.session_state.student_data = student
-                            st.toast(f"Welcome Back {student['name']}")
-                            time.sleep(1)
-                            st.rerun()
+                            st.session_state.pending_student = student
+                            st.session_state.pending_frontal = img
                     else:
                         st.info('Face not recognized! You might be a new student!')
                         show_registration = True
+
+    if not photo_source:
+        for k in ('pending_student', 'pending_frontal', 'liveness_task',
+                  'liveness_passed', 'liveness_attempt', 'liveness_steps',
+                  'liveness_idx', 'liveness_start', 'liveness_fails'):
+            st.session_state.pop(k, None)
+
+    if st.session_state.get('pending_student') and not show_registration:
+        if run_liveness_challenge(st.session_state.pending_frontal):
+            student = st.session_state.pop('pending_student')
+            st.session_state.pop('pending_frontal', None)
+            st.session_state.pop('liveness_task', None)
+            st.session_state.pop('liveness_passed', None)
+            st.session_state.is_logged_in = True
+            st.session_state.user_role    = 'student'
+            st.session_state.student_data = student
+            st.toast(f"Welcome Back {student['name']}")
+            time.sleep(1)
+            st.rerun()
 
     if show_registration:
         with st.container(border=True):

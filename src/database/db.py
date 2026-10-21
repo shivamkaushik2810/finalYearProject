@@ -39,8 +39,16 @@ def teacher_login(username, password):
 
 
 def get_all_students():
-    response = supabase.table('students').select("*").execute()
-    return response.data
+    rows, start = [], 0
+    while True:
+        res = supabase.table('students').select("*") \
+            .range(start, start + 999).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        start += 1000
+    return rows
 
 
 def create_student(new_name, face_embedding=None, voice_embedding=None,
@@ -148,13 +156,17 @@ def delete_marks(mark_id, teacher_id=None):
     return response.data
 
 
-def create_subject(subject_code, name, section, teacher_id):
+def create_subject(subject_code, name, section, teacher_id, course=None, year=None):
     data = {
         "subject_code": subject_code,
         "name":         name,
         "section":      section,
         "teacher_id":   teacher_id
     }
+    if course:
+        data["course"] = course
+    if year:
+        data["year"] = str(year)
     response = supabase.table("subjects").insert(data).execute()
     return response.data
 
@@ -197,6 +209,7 @@ def check_section_match(student_id, subject_id):
 
 
 def enroll_student_to_subject(student_id, subject_id):
+    _assert_can_enroll(student_id, subject_id)
     ok, msg = check_section_match(student_id, subject_id)
     if not ok:
         raise ValueError(msg)
@@ -434,3 +447,17 @@ def teacher_login_checked(username, password):
     except Exception as e:
         print(f"Teacher lockout bookkeeping failed: {e}")
     return None, ""
+
+
+def _assert_can_enroll(student_id, subject_id):
+    """Raises ValueError unless the student's course/year/section match the subject's."""
+    from src.components.filters import can_enroll
+    stu = supabase.table('students').select('course, year, section')\
+        .eq('student_id', student_id).execute().data
+    sub = supabase.table('subjects').select('name, course, year, section')\
+        .eq('subject_id', subject_id).execute().data
+    if not stu or not sub:
+        raise ValueError("Student or subject not found.")
+    ok, why = can_enroll(sub[0], stu[0])
+    if not ok:
+        raise ValueError(f"Cannot enroll in {sub[0]['name']}: {why}")

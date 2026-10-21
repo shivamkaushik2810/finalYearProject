@@ -217,6 +217,8 @@ def send_all_attendance_emails(logs, subject_name, subject_code,
         if not email:
             student_fail += 1
             continue
+        if email.lower().endswith('@example.com'):
+            continue
         try:
             send_student_attendance_email(
                 student['name'], email,

@@ -73,6 +73,11 @@ def _all_rows(table, select, order=None, page=1000):
     return out
 
 
+@st.cache_data(ttl=300, show_spinner="Loading data (cached for 5 minutes)...")
+def _cached_rows(table, select, order=()):
+    return _all_rows(table, select, list(order))
+
+
 def _download_pair(df, title, subtitle, base, key):
     c1, c2 = st.columns(2)
     c1.download_button("⬇️ CSV", df.to_csv(index=False).encode("utf-8"),
@@ -134,28 +139,43 @@ def _approvals_tab():
 
 def _overview_tab():
     try:
-        subjects = _all_rows('subjects', 'subject_id, name, subject_code, section, teacher_id, teachers(name)', ['subject_id'])
-        enrolled = _all_rows('subject_students', 'subject_id, student_id', ['subject_id', 'student_id'])
-        logs = _all_rows('attendance_logs', 'subject_id, student_id, is_present, timestamp, status',
-                         ['timestamp', 'subject_id', 'student_id'])
-        students = _all_rows('students', 'student_id, name, roll_no, section, parent_email', ['student_id'])
+        subjects = _cached_rows('subjects', 'subject_id, name, subject_code, section, course, year, teacher_id, teachers(name)', ('subject_id',))
+        pairs = _cached_rows('admin_pair_stats', 'subject_id, student_id, total, present', ('subject_id', 'student_id'))
+        sess = {str(r['subject_id']): r['sessions'] for r in _cached_rows('admin_session_counts', 'subject_id, sessions', ('subject_id',))}
+        students = _cached_rows('students', 'student_id, name, roll_no, section, course, year, parent_email', ('student_id',))
     except Exception as e:
         st.error(f"Could not load data: {e}")
+        st.caption("If this mentions admin_pair_stats or admin_session_counts, run the view SQL in Supabase first.")
         return
 
-    sections = sorted({s['section'] for s in subjects if s.get('section')})
-    choice = st.selectbox("Section", ["All sections"] + sections, key="adm_section")
-    sel = [s for s in subjects if choice == "All sections" or s.get('section') == choice]
-    ids = {s['subject_id'] for s in sel}
-    logs_f = eligible([l for l in logs if l['subject_id'] in ids])
-    enr_f = [e for e in enrolled if e['subject_id'] in ids]
+    top = st.columns([5, 1])
+    top[0].caption("Data is cached for 5 minutes for speed. Press Refresh after new attendance is saved.")
+    if top[1].button("Refresh", key="adm_refresh"):
+        st.cache_data.clear()
+        st.rerun()
 
-    present = sum(1 for l in logs_f if l.get('is_present'))
-    avg = round(present / len(logs_f) * 100, 1) if logs_f else 0.0
-    sessions = len({(l['subject_id'], l['timestamp']) for l in logs_f})
+    def _opts(rows, field):
+        return sorted({str(r[field]).strip() for r in rows if r.get(field) not in (None, '')})
+
+    f1, f2, f3 = st.columns(3)
+    course = f1.selectbox("Course", ["All courses"] + _opts(subjects, 'course'), key="adm_course")
+    year = f2.selectbox("Year", ["All years"] + _opts(subjects, 'year'), key="adm_year")
+    pool = [x for x in subjects
+            if (course == "All courses" or str(x.get('course')) == course)
+            and (year == "All years" or str(x.get('year')) == year)]
+    choice = f3.selectbox("Section", ["All sections"] + _opts(pool, 'section'), key="adm_section")
+    sel = [x for x in pool if choice == "All sections" or x.get('section') == choice]
+    scope = f"{course} | {year if year == 'All years' else 'Year ' + year} | {choice}"
+
+    ids = {str(x['subject_id']) for x in sel}
+    pairs_f = [p for p in pairs if str(p['subject_id']) in ids]
+    total_all = sum(p['total'] for p in pairs_f)
+    present_all = sum(p['present'] for p in pairs_f)
+    avg = round(present_all / total_all * 100, 1) if total_all else 0.0
+    sessions = sum(sess.get(i, 0) for i in ids)
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Students", len({e['student_id'] for e in enr_f}))
+    c1.metric("Students", len({p['student_id'] for p in pairs_f}))
     c2.metric("Teachers", len(get_teachers_by_status('approved')))
     c3.metric("Subjects", len(sel))
     c4.metric("Sessions", sessions)
@@ -163,50 +183,59 @@ def _overview_tab():
 
     # per-subject table
     st.subheader("Subject-wise attendance")
+    by_sub = {}
+    for p in pairs_f:
+        a = by_sub.setdefault(str(p['subject_id']), [0, 0, 0])
+        a[0] += 1
+        a[1] += p['total']
+        a[2] += p['present']
     rows = []
-    for s in sel:
-        sl = [l for l in logs_f if l['subject_id'] == s['subject_id']]
-        sp = sum(1 for l in sl if l.get('is_present'))
+    for x in sel:
+        enr, tot, pres = by_sub.get(str(x['subject_id']), [0, 0, 0])
         rows.append({
-            "Subject": s['name'], "Code": s['subject_code'], "Section": s.get('section') or "",
-            "Teacher": (s.get('teachers') or {}).get('name', ""),
-            "Enrolled": sum(1 for e in enr_f if e['subject_id'] == s['subject_id']),
-            "Sessions": len({l['timestamp'] for l in sl}),
-            "Attendance %": round(sp / len(sl) * 100, 1) if sl else 0.0,
+            "Subject": x['name'], "Code": x['subject_code'], "Course": x.get('course') or "",
+            "Year": x.get('year') or "", "Section": x.get('section') or "",
+            "Teacher": (x.get('teachers') or {}).get('name', ""),
+            "Enrolled": enr, "Sessions": sess.get(str(x['subject_id']), 0),
+            "Attendance %": round(pres / tot * 100, 1) if tot else 0.0,
         })
     if rows:
         df = pd.DataFrame(rows)
         st.dataframe(df, hide_index=True, width='stretch')
-        _download_pair(df, "Subject-wise Attendance Report", f"Section: {choice}", "subject_attendance", "adm_subj")
+        _download_pair(df, "Subject-wise Attendance Report", scope, "subject_attendance", "adm_subj")
     else:
         st.info("No subjects for this selection.")
 
     # defaulters
     st.subheader("Defaulters (all subjects)")
     thr = st.slider("Attendance threshold (%)", 40, 95, REQUIRED_PCT, 5, key="adm_thr")
-    info = {s['student_id']: s for s in students}
+    info = {x['student_id']: x for x in students}
     agg = {}
-    for l in logs_f:
-        a = agg.setdefault(l['student_id'], [0, 0])
-        a[1] += 1
-        if l.get('is_present'):
-            a[0] += 1
+    for p in pairs_f:
+        a = agg.setdefault(p['student_id'], [0, 0])
+        a[0] += p['present']
+        a[1] += p['total']
     drows = []
-    for sid, (p, t) in agg.items():
-        pct = round(p / t * 100, 1)
+    for sid, (pr, t) in agg.items():
+        if t == 0:
+            continue
+        pct = round(pr / t * 100, 1)
         if pct >= thr or sid not in info:
             continue
-        s = info[sid]
-        drows.append({"Name": s['name'], "Roll No": s.get('roll_no') or "", "Section": s.get('section') or "",
-                      "Present/Total": f"{p}/{t}", "Attendance %": pct,
-                      "Classes needed": _classes_needed(p, t, thr), "Parent email": s.get('parent_email') or ""})
+        x = info[sid]
+        drows.append({"Name": x['name'], "Roll No": x.get('roll_no') or "", "Course": x.get('course') or "",
+                      "Year": x.get('year') or "", "Section": x.get('section') or "",
+                      "Present/Total": f"{pr}/{t}", "Attendance %": pct,
+                      "Classes needed": _classes_needed(pr, t, thr), "Parent email": x.get('parent_email') or ""})
     if not drows:
         st.success(f"No students below {thr}%.")
     else:
         ddf = pd.DataFrame(drows).sort_values("Attendance %")
         st.warning(f"{len(ddf)} student(s) below {thr}%")
-        st.dataframe(ddf, hide_index=True, width='stretch')
-        _download_pair(ddf, "Defaulters Report", f"Below {thr}% - Section: {choice}", "defaulters", "adm_def")
+        st.dataframe(ddf.head(500), hide_index=True, width='stretch')
+        if len(ddf) > 500:
+            st.caption("Showing the 500 lowest. The CSV and PDF downloads contain all of them.")
+        _download_pair(ddf, "Defaulters Report", f"Below {thr}% - {scope}", "defaulters", "adm_def")
 
 
 # ───────────────────────── dashboard ─────────────────────────

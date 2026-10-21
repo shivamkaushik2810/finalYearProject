@@ -70,14 +70,21 @@ def _find_clash(slots, subject, day, start, end, room, enrolled_cache):
     return None
 
 
+def _opt_label(s):
+    return (f"{s['name']} ({s['subject_code']}) — {s.get('course') or '-'} Y{s.get('year') or '-'} "
+            f"Sec {s.get('section') or '-'} — {(s.get('teachers') or {}).get('name', '?')}")
+
+
 def admin_timetable_manager():
+    from src.components.filters import cascade_filter, fetch_all
     st.subheader("🗓️ Timetable Management")
     try:
-        subjects = supabase.table('subjects')\
-            .select('subject_id, name, subject_code, section, teacher_id, teachers(name)').execute().data or []
-        slots = supabase.table('timetables')\
-            .select('*, subjects(name, subject_code, section, teacher_id)')\
-            .order('day_of_week').order('start_time').execute().data or []
+        subjects = fetch_all(lambda: supabase.table('subjects')
+                             .select('subject_id, name, subject_code, section, course, year, teacher_id, teachers(name)')
+                             .order('subject_id'))
+        slots = fetch_all(lambda: supabase.table('timetables')
+                          .select('*, subjects(name, subject_code, section, course, year, teacher_id)')
+                          .order('day_of_week').order('start_time').order('id'))
     except Exception as e:
         st.error("Timetable table is not available. Run the Phase 4 SQL in Supabase.")
         print(f"Timetable admin error: {e}")
@@ -87,10 +94,13 @@ def admin_timetable_manager():
         st.info("No subjects exist yet.")
         return
 
-    opts = {
-        f"{s['name']} ({s['subject_code']}) — Sec {s['section']} — {(s.get('teachers') or {}).get('name', '?')}": s
-        for s in subjects
-    }
+    st.caption("Choose a class: the subject list and the timetable below show only that class.")
+    scope = cascade_filter(subjects, "tt_f", labels={"year": "Study year"})
+    if not scope:
+        st.warning("No subjects match these filters.")
+        return
+    scope_ids = {x['subject_id'] for x in scope}
+    opts = {_opt_label(x): x for x in scope}
 
     with st.container(border=True):
         label = st.selectbox("Subject", list(opts.keys()), key="tt_subject")
@@ -122,22 +132,23 @@ def admin_timetable_manager():
                     except Exception as e:
                         st.error(f"Could not add slot: {e}")
 
-    st.subheader("Current timetable")
-    if not slots:
-        st.info("No slots yet.")
+    st.subheader("Current timetable (selected class)")
+    shown = [x for x in slots if x['subject_id'] in scope_ids]
+    if not shown:
+        st.info("No slots yet for this selection.")
         return
     for d in range(7):
-        day_slots = [s for s in slots if s['day_of_week'] == d]
+        day_slots = [x for x in shown if x['day_of_week'] == d]
         if not day_slots:
             continue
         with st.container(border=True):
             st.write(f"**{DAYS[d]}**")
-            for s in day_slots:
-                sub = s.get('subjects') or {}
+            for x in day_slots:
+                sub = x.get('subjects') or {}
                 a, b = st.columns([6, 1])
-                room_txt = f" · Room {s['room']}" if s.get('room') else ""
-                a.write(f"🕐 {_hhmm(s['start_time'])}–{_hhmm(s['end_time'])} — "
-                        f"{sub.get('name', '?')} (Sec {sub.get('section', '?')}){room_txt}")
-                if b.button("Delete", key=f"tt_del_{s['id']}"):
-                    supabase.table('timetables').delete().eq('id', s['id']).execute()
+                room_txt = f" · Room {x['room']}" if x.get('room') else ""
+                a.write(f"🕐 {_hhmm(x['start_time'])}–{_hhmm(x['end_time'])} — {sub.get('name', '?')} "
+                        f"({sub.get('course') or '-'} Y{sub.get('year') or '-'} Sec {sub.get('section', '?')}){room_txt}")
+                if b.button("Delete", key=f"tt_del_{x['id']}"):
+                    supabase.table('timetables').delete().eq('id', x['id']).execute()
                     st.rerun()

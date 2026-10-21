@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from src.database.config import supabase
+from src.components.filters import cascade_filter, fetch_all
 
 YEAR_RE = re.compile(r"^\d{4}-\d{2}$")
 
@@ -19,6 +20,11 @@ def _clean_sem(v):
     return int(v)
 
 
+def _chunks(items, size=50):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
 def admin_term_manager():
     if not st.session_state.get("admin_data"):
         return
@@ -26,9 +32,9 @@ def admin_term_manager():
     st.caption("Give each subject an academic year (for example 2026-27) and a semester. "
                "These power the filters in Student Analytics.")
     try:
-        rows = (supabase.table("subjects")
-                .select("subject_id, name, subject_code, section, academic_year, semester, teachers(name)")
-                .order("name").execute().data or [])
+        rows = fetch_all(lambda: supabase.table("subjects")
+                         .select("subject_id, name, subject_code, section, course, year, academic_year, semester, teachers(name)")
+                         .order("subject_id"))
     except Exception as e:
         print(f"Terms: {type(e).__name__}")
         st.error("Academic terms are not set up yet. Run the academic terms SQL in Supabase.")
@@ -37,28 +43,41 @@ def admin_term_manager():
         st.info("No subjects yet.")
         return
 
+    st.caption("Choose a class to work on")
+    shown = cascade_filter(rows, "term_f", labels={"year": "Study year"})
+    if not shown:
+        st.warning("No subjects match these filters.")
+        return
+
     df = pd.DataFrame([{
-        "subject_id": r["subject_id"], "Subject": r["name"], "Code": r["subject_code"], "Section": r.get("section") or "",
+        "subject_id": r["subject_id"], "Subject": r["name"], "Code": r["subject_code"],
+        "Course": r.get("course") or "", "Study year": r.get("year") or "", "Section": r.get("section") or "",
         "Teacher": (r.get("teachers") or {}).get("name", ""),
         "Academic year": r.get("academic_year") or "", "Semester": r.get("semester"),
-    } for r in rows])
+    } for r in shown])
 
-    with st.expander("Bulk assign to subjects that have no value yet"):
+    with st.expander(f"Bulk assign to the {len(shown)} subject(s) shown that have no value yet"):
         b1, b2 = st.columns(2)
         year = b1.text_input("Academic year", placeholder="2026-27", key="term_bulk_year").strip()
         sem = b2.number_input("Semester", 1, 12, 1, key="term_bulk_sem")
-        if st.button("Apply to unassigned subjects", key="term_bulk_btn"):
+        if st.button("Apply to unassigned subjects shown", key="term_bulk_btn"):
             if not YEAR_RE.match(year):
                 st.error("Use the format 2026-27.")
             else:
-                supabase.table("subjects").update({"academic_year": year}).is_("academic_year", "null").execute()
-                supabase.table("subjects").update({"semester": int(sem)}).is_("semester", "null").execute()
+                ids = [r["subject_id"] for r in shown]
+                for part in _chunks(ids):
+                    supabase.table("subjects").update({"academic_year": year}) \
+                        .in_("subject_id", part).is_("academic_year", "null").execute()
+                    supabase.table("subjects").update({"semester": int(sem)}) \
+                        .in_("subject_id", part).is_("semester", "null").execute()
                 st.cache_data.clear()
                 st.toast("Applied.")
                 st.rerun()
 
+    scope_key = "_".join(str(st.session_state.get(f"term_f_{f}", "All")) for f in ("course", "year", "section"))
     edited = st.data_editor(
-        df, hide_index=True, key="term_editor", disabled=["Subject", "Code", "Section", "Teacher"],
+        df, hide_index=True, key=f"term_editor_{scope_key}",
+        disabled=["Subject", "Code", "Course", "Study year", "Section", "Teacher"],
         column_config={"subject_id": None,
                        "Academic year": st.column_config.TextColumn("Academic year", help="Format 2026-27"),
                        "Semester": st.column_config.NumberColumn("Semester", min_value=1, max_value=12, step=1)})
