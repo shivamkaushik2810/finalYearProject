@@ -135,7 +135,13 @@ def teacher_tab_ai_insights(subjects, teacher_id):
                 from src.services.scheduler import manual_send_weekly_reports
                 with st.spinner("Sending weekly reports to all parents..."):
                     success, failed = manual_send_weekly_reports()
-                st.success(f"✅ Reports sent! Success: {success}, Failed: {failed}")
+                if success == 0 and failed == 0:
+                    st.info("Nothing to send: no classes last week, no parent emails, "
+                            "or every parent already received this week's report.")
+                elif failed:
+                    st.warning(f"Sent: {success}, failed: {failed}. Failed ones retry on the next run.")
+                else:
+                    st.success(f"✅ Sent {success} report(s).")
         with col2:
             st.metric("Next Auto Send", "Every Monday")
     st.divider()

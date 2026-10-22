@@ -45,3 +45,13 @@ sql/wipe_simple.sql
 model.pkl
 learning_log.txt
 backups/
+
+# local dev helpers (demo seeders, password tools, old backups)
+scripts/seed_*.py
+scripts/create_demo_teacher.py
+scripts/reset_teacher_password.py
+performance_logs/
+.pytest_cache/
+backup_filters/
+backup_year_course/
+*.old2
