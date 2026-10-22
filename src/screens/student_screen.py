@@ -9,7 +9,7 @@ import numpy as np
 from src.pipelines.face_pipeline import predict_attendance, get_face_embeddings, train_classifier
 from src.pipelines.voice_pipeline import get_voice_embedding
 from src.pipelines.liveness_detection import detect_screen_or_photo, check_face_quality
-from src.database.db import get_all_students, create_student, get_student_subjects, get_student_attendance, unenroll_student_to_subject
+from src.database.db import get_student_by_id, get_all_students, create_student, get_student_subjects, get_student_attendance, unenroll_student_to_subject
 from src.services.otp_service import send_and_save_otp, verify_otp, is_email_verified, mark_email_verified
 import time
 from src.components.liveness_challenge import run_liveness_challenge

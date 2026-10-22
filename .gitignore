@@ -28,3 +28,20 @@ htmlcov/
 # Python virtual environments
 .venv/
 .venv-backup/
+.env.save
+backups/
+
+# local-only files
+*.bak
+*.old
+*.before_sigfix
+apply_optimizations.py
+backup_db.py
+fix_signatures.py
+restore_missing_db_funcs.py
+wipe_local_training.py
+wipe_via_python.py
+sql/wipe_simple.sql
+model.pkl
+learning_log.txt
+backups/

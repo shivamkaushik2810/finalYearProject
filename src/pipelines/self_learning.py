@@ -7,6 +7,7 @@ from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from src.database.config import supabase
+from src.database.db import get_all_students, count_students, _fetch_all
 from src.database.students_query import get_students_with_faces
 
 
@@ -34,10 +35,7 @@ def get_all_training_data():
     (duplicating rows would leak into cross-validation).
     Returns (X, y, weights, total_students)
     """
-    students_res = supabase.table('students')\
-        .select('student_id, name, face_embedding')\
-        .execute()
-    students = students_res.data or []
+    students = get_all_students()
 
     X, y, w = [], [], []
     for student in students:
@@ -53,7 +51,9 @@ def get_all_training_data():
     # Teacher-confirmed detections (genuine new samples of each student)
     sample_count = 0
     try:
-        rows = supabase.table('face_samples').select('student_id, embedding').execute().data or []
+        rows = _fetch_all(
+            lambda: supabase.table('face_samples').select('student_id, embedding'),
+            order=('id',))
         for r in rows:
             if r.get('embedding') and r.get('student_id'):
                 X.append(r['embedding'])
