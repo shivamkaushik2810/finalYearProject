@@ -70,6 +70,8 @@ def send_weekly_reports_to_all_parents(force=False):
                 try:
                     if not stu.get('parent_email'):
                         continue
+                    if not TEST_EMAIL_TO and stu['parent_email'].strip().lower().endswith('.invalid'):
+                        continue   # QA/test addresses never receive real mail
                     reports, rows = [], []
                     for sub in subjects_map.get(sid, []):
                         total, attended = counts.get((sid, sub['subject_id']), (0, 0))

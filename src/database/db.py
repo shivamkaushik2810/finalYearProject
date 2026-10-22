@@ -522,3 +522,43 @@ def create_subject(*args, **kwargs):
     result = _create_subject_uncached(*args, **kwargs)
     get_teacher_subjects.clear()
     return result
+
+
+# restored from db.py.old
+_DUMMY_HASH = hash_pass("not-a-real-password")
+
+
+# restored from db.py.old
+def _norm_section(v):
+    return (v or "").strip().upper()
+
+
+# restored from db.py.old
+def _teacher_owns_mark(teacher_id, mark_id):
+    r = supabase.table('marks').select('subject_id').eq('id', mark_id).execute()
+    return bool(r.data) and _teacher_owns_subject(teacher_id, r.data[0]['subject_id'])
+
+
+# restored from db.py.old
+def _teacher_owns_subject(teacher_id, subject_id):
+    r = supabase.table('subjects').select('subject_id')\
+        .eq('subject_id', subject_id).eq('teacher_id', teacher_id).execute()
+    return bool(r.data)
+
+
+# restored from db.py.old
+def _validate_marks(marks_obtained, max_marks):
+    try:
+        m, mx = float(marks_obtained), float(max_marks)
+    except (TypeError, ValueError):
+        raise ValueError("Marks must be numbers.")
+    if mx <= 0:
+        raise ValueError("Maximum marks must be greater than 0.")
+    if m < 0 or m > mx:
+        raise ValueError(f"Marks must be between 0 and {mx:g}.")
+
+
+def eligible(rows):
+    """Resolved lazily so importing db.py never creates a circular import."""
+    from src.database.attendance_status import eligible as _eligible
+    return _eligible(rows)
