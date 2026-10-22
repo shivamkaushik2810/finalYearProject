@@ -472,6 +472,26 @@ def f_status_filter():
     return "excused/cancelled rows are excluded the same way in the app, the views and the weekly report"
 
 
+def f_full_logs():
+    rows = db.get_subject_logs_full(S1["subject_id"])
+    eq(len(rows), len(S1["sessions"]) * 100, "rows (the old query stopped at 1000)")
+    assert "status" in rows[0], "status column missing"
+    return f"{len(rows)} rows, all columns"
+
+
+def f_marks_filter():
+    import inspect
+    sub = S1["subject_id"]
+    rows = db.get_marks_by_subject(sub)
+    assert isinstance(rows, list), f"returns {type(rows).__name__}, expected list"
+    eq(len(rows), 300, "marks")
+    if "verified_only" in inspect.signature(db.get_marks_by_subject).parameters:
+        v = db.get_marks_by_subject(sub, verified_only=True)
+        assert isinstance(v, list) and len(v) <= 300
+        return f"verified_only returns {len(v)} of 300 test marks"
+    return "no verified_only option"
+
+
 print("\n== FUNCTIONAL TESTS")
 for name, fn in [
     ("100 test students stored", f_count_students),
@@ -494,6 +514,8 @@ for name, fn in [
     ("create subject + enroll + attendance flow", f_create_subject_flow),
     ("admin attendance stats (eligible filter)", f_subject_attendance_stats),
     ("excused/cancelled handled consistently", f_status_filter),
+    ("full logs of a subject (no 1000 cap)", f_full_logs),
+    ("marks by subject (list, verified_only)", f_marks_filter),
 ]:
     run("functional", name, fn)
 

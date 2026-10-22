@@ -131,12 +131,14 @@ def update_marks(mark_id, marks_obtained, max_marks=100,
 
 
 def get_marks_by_subject(subject_id, verified_only=False):
-    q = supabase.table('marks')\
-        .select('*, students(name, roll_no, section, year)')\
-        .eq('subject_id', subject_id)
-    if verified_only:
-        q = q.neq('entry_status', 'unverified')
-    return q.execute().data
+    def _build():
+        q = supabase.table('marks')\
+            .select('*, students(name, roll_no, section, year)')\
+            .eq('subject_id', subject_id)
+        if verified_only:
+            q = q.neq('entry_status', 'unverified')
+        return q
+    return _fetch_all(_build, order=('id',))
 
 
 def get_marks_by_student(student_id):
@@ -565,3 +567,10 @@ def eligible(rows):
     """Resolved lazily so importing db.py never creates a circular import."""
     from src.database.attendance_status import eligible as _eligible
     return _eligible(rows)
+
+
+def get_subject_logs_full(subject_id):
+    """All attendance rows of one subject, every column, no 1000-row cap."""
+    return _fetch_all(
+        lambda: supabase.table('attendance_logs').select('*').eq('subject_id', subject_id),
+        order=('timestamp', 'student_id'))

@@ -1,4 +1,6 @@
 from src.components.filters import subject_label
+from types import SimpleNamespace as _NS
+from src.database.db import _fetch_all
 import pandas as pd
 import streamlit as st
 
@@ -18,9 +20,9 @@ def _enrolled(subject_id):
 
 
 def _logs(subject_id):
-    res = supabase.table('attendance_logs')\
-        .select('student_id, is_present, timestamp, status')\
-        .eq('subject_id', subject_id).execute()
+    res = _NS(data=_fetch_all(
+        lambda: supabase.table('attendance_logs').select('student_id, is_present, timestamp, status').eq('subject_id', subject_id),
+        order=('timestamp', 'student_id')))
     return eligible(res.data)
 
 

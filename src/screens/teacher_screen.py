@@ -1,4 +1,6 @@
 from src.components.filters import subject_label
+from types import SimpleNamespace as _NS
+from src.database.db import get_subject_logs_full
 import re
 import time
 import streamlit as st
@@ -160,7 +162,7 @@ def teacher_tab_ai_insights(subjects, teacher_id):
         enrolled_res = supabase.table("subject_students").select("student_id, students(student_id, name, email)").eq("subject_id", sid).execute()
         enrolled = [n["students"] for n in (enrolled_res.data or []) if n.get("students")]
 
-        logs_res = supabase.table("attendance_logs").select("*").eq("subject_id", sid).execute()
+        logs_res = _NS(data=get_subject_logs_full(sid))
         logs = eligible(logs_res.data)
 
         st.divider()

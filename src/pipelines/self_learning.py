@@ -205,8 +205,7 @@ def should_auto_retrain():
             return True, f"Model is {days_since} days old"
 
         last_count    = model_data.get('total_students', 0)
-        current_res   = supabase.table('students').select('student_id').execute()
-        current_count = len(current_res.data or [])
+        current_count = count_students()
 
         if current_count > last_count:
             return True, f"New students added ({current_count - last_count} new)"

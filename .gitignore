@@ -61,3 +61,8 @@ find_eligible.py
 fix_helpers.py
 fix_missing_helpers.py
 *.before_helpers
+triage_queries.py
+scan_truncation.py
+patch_truncation.py
+*.bak_trunc
+*.before_status
