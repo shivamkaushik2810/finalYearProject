@@ -35,7 +35,7 @@ def get_all_training_data():
     (duplicating rows would leak into cross-validation).
     Returns (X, y, weights, total_students)
     """
-    students = get_all_students()
+    students = get_students_with_faces()
 
     X, y, w = [], [], []
     for student in students:
@@ -64,7 +64,7 @@ def get_all_training_data():
         log_message(f"face_samples unavailable: {e}")
     log_message(f"Confirmed attendance samples: {sample_count}")
 
-    return X, y, w, len(students)
+    return X, y, w, count_students()
 
 
 def train_self_learning_model(training_type="auto"):
