@@ -57,7 +57,6 @@ backup_year_course/
 *.old2
 test_run/
 *.tar.gz
-SQL
 find_eligible.py
 fix_helpers.py
 fix_missing_helpers.py
