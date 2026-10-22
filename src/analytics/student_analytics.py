@@ -526,14 +526,16 @@ def forecast_attendance(weekly, cfg, horizon=4):
     resid = y - (intercept + slope * x)
     dof = n - 2
     s = math.sqrt(float((resid ** 2).sum()) / dof)
-    xbar, sxx, t = x.mean(), float(((x - xbar) ** 2).sum()) if False else float(((x - x.mean()) ** 2).sum()), _tcrit(dof)
+    xbar = float(x.mean())
+    sxx = float(((x - xbar) ** 2).sum())
+    t = _tcrit(dof)
     last_week = weekly["week"].iloc[-1]
     clip = lambda v: float(min(100.0, max(0.0, v)))
     future = []
     for h in range(1, horizon + 1):
         xi = n - 1 + h
         pred = intercept + slope * xi
-        half = t * s * math.sqrt(1 + 1 / n + (xi - x.mean()) ** 2 / sxx)
+        half = t * s * math.sqrt(1 + 1 / n + (xi - xbar) ** 2 / sxx)
         future.append({"week": last_week + pd.Timedelta(weeks=h), "pred": clip(pred),
                        "low": clip(pred - half), "high": clip(pred + half)})
     err_m, err_n = [], []
