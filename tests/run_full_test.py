@@ -214,6 +214,136 @@ def u_detectors_blank_image():
     eq(get_class_emotion_summary([]), {})
 
 
+def _weekly(vals):
+    import pandas as pd
+    return pd.DataFrame({"week": pd.date_range("2026-07-06", periods=len(vals), freq="7D"),
+                         "pct": [float(v) for v in vals]})
+
+
+def _cfg(n=10):
+    from types import SimpleNamespace
+    return SimpleNamespace(min_forecast_weeks=n)
+
+
+def u_forecast_min_weeks():
+    from src.analytics.student_analytics import forecast_attendance
+    r = forecast_attendance(_weekly([80] * 9), _cfg())
+    eq(r["status"], "insufficient")
+    eq(r["n"], 9)
+    assert "10" in r["reason"], r["reason"]
+    r = forecast_attendance(_weekly([90 - 2 * i for i in range(10)]), _cfg())
+    eq(r["status"], "ok", "exactly the minimum number of weeks")
+    eq(len(r["forecast"]), 4, "default horizon")
+    r = forecast_attendance(_weekly([90 - 2 * i for i in range(12)]), _cfg(), horizon=2)
+    eq(len(r["forecast"]), 2, "custom horizon")
+
+
+def u_forecast_linear():
+    from src.analytics.student_analytics import forecast_attendance
+    r = forecast_attendance(_weekly([90 - 2 * i for i in range(12)]), _cfg())
+    eq(r["status"], "ok")
+    eq(r["slope_per_week"], -2.0, "slope")
+    for h, f in enumerate(r["forecast"], start=1):
+        assert abs(f["pred"] - (68 - 2 * h)) < 1e-6, f"week +{h}: {f['pred']}"
+        assert f["high"] - f["low"] < 1e-6, "a perfect line should give a zero-width interval"
+    eq(r["mae"], 0.0, "backtest error of a perfect line")
+    eq(r["naive_mae"], 2.0, "naive (last value) error")
+    assert r["beats_naive"] is True
+
+
+def u_forecast_clipping():
+    from src.analytics.student_analytics import forecast_attendance
+    up = forecast_attendance(_weekly([70 + 2.5 * i for i in range(12)]), _cfg())
+    for f in up["forecast"]:
+        assert 0 <= f["low"] <= f["pred"] <= f["high"] <= 100, f
+    for f in up["forecast"][1:]:
+        assert abs(f["pred"] - 100) < 1e-6, f"rising trend must stop at 100: {f}"
+    down = forecast_attendance(_weekly([30 - 2.5 * i for i in range(12)]), _cfg())
+    for f in down["forecast"]:
+        assert 0 <= f["low"] <= f["pred"] <= f["high"] <= 100, f
+    for f in down["forecast"][1:]:
+        assert abs(f["pred"]) < 1e-6, f"falling trend must stop at 0: {f}"
+
+
+def u_forecast_noisy():
+    import pandas as pd
+    from src.analytics.student_analytics import forecast_attendance
+    noise = [3, -2, 1, -3, 2, -1, 3, -2, 1, -3, 2, -1]
+    weekly = _weekly([80 + v for v in noise])
+    r = forecast_attendance(weekly, _cfg())
+    eq(r["slope_per_week"], -0.08, "slope")
+    widths = [f["high"] - f["low"] for f in r["forecast"]]
+    assert all(b > a for a, b in zip(widths, widths[1:])), f"interval must widen with the horizon: {widths}"
+    assert widths[0] > 5, f"interval too narrow for noisy data: {widths[0]:.1f}"
+    for f in r["forecast"]:
+        assert f["low"] < f["pred"] < f["high"], f
+    gaps = [(b["week"] - a["week"]).days for a, b in zip(r["forecast"], r["forecast"][1:])]
+    eq(gaps, [7, 7, 7], "weeks advance by 7 days")
+    eq(r["forecast"][0]["week"], weekly["week"].iloc[-1] + pd.Timedelta(weeks=1))
+    assert r["mae"] >= 0 and r["naive_mae"] >= 0
+
+
+def u_tcrit_default():
+    from src.analytics.student_analytics import _tcrit, AnalyticsConfig
+    true_t = {8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145, 15: 2.131,
+              16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086, 25: 2.060, 30: 2.042}
+    worst = 0.0
+    for dof, tv in true_t.items():
+        dev = abs(_tcrit(dof) - tv) / tv
+        worst = max(worst, dev)
+        assert dev < 0.02, f"dof {dof}: table {_tcrit(dof)} vs true {tv}"
+    vals = [_tcrit(d) for d in range(8, 60)]
+    assert all(b <= a for a, b in zip(vals, vals[1:])), "t must not grow with more data"
+    default_min = AnalyticsConfig.__dataclass_fields__["min_forecast_weeks"].default
+    assert default_min >= 10, f"min_forecast_weeks={default_min} gives dof<8, where _tcrit is far too small"
+    return f"largest deviation from the true t value: {worst * 100:.1f}%"
+
+
+def u_prob_meet_target():
+    from fractions import Fraction
+    from math import comb, factorial
+    from src.analytics.student_analytics import prob_meet_target
+    assert prob_meet_target(3, 4, 5, 75) is None, "too few classes so far"
+    assert prob_meet_target(30, 40, 0, 75) is None, "no classes remaining"
+    eq(prob_meet_target(18, 20, 5, 50), 1.0, "already safe")
+    eq(prob_meet_target(2, 10, 2, 90), 0.0, "impossible")
+
+    def B(x, y):
+        return Fraction(factorial(x - 1) * factorial(y - 1), factorial(x + y - 1))
+
+    def exact(present, total, remaining, target):
+        a, b = present + 1, total - present + 1
+        kmin = -(-target * (total + remaining) // 100) - present      # integer ceiling
+        return float(sum(comb(remaining, k) * B(k + a, remaining - k + b) / B(a, b)
+                         for k in range(max(kmin, 0), remaining + 1)))
+
+    for args in [(7, 10, 5, 70), (15, 20, 10, 75), (30, 40, 8, 80), (5, 10, 6, 60),
+                 (12, 30, 10, 50), (45, 50, 10, 90)]:
+        got, exp = prob_meet_target(*args), exact(*args)
+        assert abs(got - exp) < 1e-9, f"{args}: got {got}, exact {exp}"
+    ps = [prob_meet_target(12, 30, 10, tg) for tg in (50, 60, 70, 80, 90)]
+    assert all(0 <= x <= 1 for x in ps), ps
+    assert all(b <= a + 1e-12 for a, b in zip(ps, ps[1:])), f"a higher target cannot be likelier: {ps}"
+
+
+def u_scenarios():
+    import pandas as pd
+    from src.analytics.student_analytics import attendance_scenarios
+    df = attendance_scenarios(15, 20, 75, [0, 5])
+    eq(len(df), 2)
+    r0, r5 = df.iloc[0], df.iloc[1]
+    eq(int(r0["must_attend"]), 0, "target already met")
+    assert r0["feasible"]
+    eq(int(r5["must_attend"]), 4, "classes needed")
+    eq(r5["pct_if_all_attended"], 80.0)
+    eq(r5["pct_if_half_attended"], 70.0)
+    eq(r5["pct_if_none_attended"], 60.0)
+    r = attendance_scenarios(4, 6, 70, [4]).iloc[0]
+    eq(int(r["must_attend"]), 3, "70% of 10 classes is exactly 7 (float rounding)")
+    bad = attendance_scenarios(5, 20, 90, [2]).iloc[0]
+    assert (not bad["feasible"]) and pd.isna(bad["must_attend"]), dict(bad)
+
+
 print("\n== UNIT TESTS")
 run("unit", "week boundaries (Mon-Sun logic)", u_week_math)
 run("unit", "bcrypt hash/check", u_password_hash)
@@ -222,6 +352,13 @@ run("unit", "NLP intents + answers", u_nlp)
 run("unit", "risk prediction + class health", u_prediction)
 run("unit", "image quality checks", u_image_quality)
 run("unit", "emotion/drowsiness on blank image", u_detectors_blank_image)
+run("unit", "forecast: minimum weeks + horizon", u_forecast_min_weeks)
+run("unit", "forecast: exact linear trend", u_forecast_linear)
+run("unit", "forecast: clipped to 0-100", u_forecast_clipping)
+run("unit", "forecast: noisy series, widening interval", u_forecast_noisy)
+run("unit", "t-table accuracy + safe default config", u_tcrit_default)
+run("unit", "probability to meet target (exact check)", u_prob_meet_target)
+run("unit", "scenarios: boundary + infeasible", u_scenarios)
 
 
 # ───────────────────────── FUNCTIONAL TESTS (database) ─────────────────────────
