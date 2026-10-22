@@ -439,12 +439,37 @@ def f_subject_attendance_stats():
     sub = S1["subject_id"]
     got = db.get_subject_attendance_stats(sub)
     eq(len(got), 100, "students in stats")
-    for sid in SIDS:
-        total, present = truth[(sid, sub)]
-        g = got[sid]
-        assert g["total"] <= total and g["present"] <= g["total"], f"{sid}: {g} vs truth {total}/{present}"
-    same = sum(1 for sid in SIDS if [got[sid]["total"], got[sid]["present"]] == truth[(sid, sub)])
-    return f"{same} of 100 students identical to ground truth (differences come from the status filter in eligible())"
+    bad = [sid for sid in SIDS if [got[sid]["total"], got[sid]["present"]] != truth[(sid, sub)]]
+    assert not bad, f"{len(bad)} of 100 students differ from ground truth (first: {got[bad[0]]} vs {truth[(bad[0], sub)]})"
+    return "all 100 students match ground truth (test rows carry no excused/cancelled status)"
+
+
+def f_status_filter():
+    try:
+        supabase.table("attendance_logs").select("status").limit(1).execute()
+    except Exception:
+        raise Skip("attendance_logs has no status column")
+    from src.services.weekly_report_runner import report_week
+    code = f"TST{M['run_id'].upper()}S{int(time.time()) % 100000}"
+    kw = dict(subject_code=code, name="QA Status", section="A", teacher_id=TID)
+    try:
+        db.create_subject(**kw, course="B.Tech", year="3")
+    except TypeError:
+        db.create_subject(**kw)
+    sub = supabase.table("subjects").select("subject_id").eq("subject_code", code).execute().data[0]["subject_id"]
+    sid = SIDS[0]
+    db.enroll_student_to_subject(sid, sub)
+    base = datetime.now().replace(microsecond=0)
+    plan = [(True, None), (False, None), (False, "excused"), (False, "cancelled")]
+    db.create_attendance([
+        {"student_id": sid, "subject_id": sub, "is_present": p, "status": st,
+         "timestamp": (base - timedelta(seconds=10 + i)).strftime(td.TS)}
+        for i, (p, st) in enumerate(plan)])
+    got = db.get_subject_attendance_stats(sub)[sid]
+    eq([got["total"], got["present"]], [2, 1], "app stats (eligible)")
+    eq(list(db.get_subject_student_stats(sub)[sid]), [2, 1], "view stats (did you run sql/status_views.sql?)")
+    eq(list(db.get_weekly_attendance_bulk(*report_week("current"))[(sid, sub)]), [2, 1], "weekly report counts")
+    return "excused/cancelled rows are excluded the same way in the app, the views and the weekly report"
 
 
 print("\n== FUNCTIONAL TESTS")
@@ -468,6 +493,7 @@ for name, fn in [
     ("enroll/unenroll refreshes cached counts", f_enroll_unenroll_cache),
     ("create subject + enroll + attendance flow", f_create_subject_flow),
     ("admin attendance stats (eligible filter)", f_subject_attendance_stats),
+    ("excused/cancelled handled consistently", f_status_filter),
 ]:
     run("functional", name, fn)
 

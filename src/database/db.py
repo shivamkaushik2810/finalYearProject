@@ -282,11 +282,11 @@ def get_weekly_attendance_bulk(week_start, week_end):
     end = str(_to_date(week_end) + timedelta(days=1))
     rows = _fetch_all(
         lambda: supabase.table('attendance_logs')
-        .select('student_id, subject_id, is_present')
+        .select('student_id, subject_id, is_present, status')
         .gte('timestamp', start).lt('timestamp', end),
         order=('timestamp', 'subject_id', 'student_id'))
     agg = {}
-    for r in rows:
+    for r in eligible(rows):
         key = (r['student_id'], r['subject_id'])
         t, a = agg.get(key, (0, 0))
         agg[key] = (t + 1, a + (1 if r.get('is_present') else 0))
@@ -406,12 +406,15 @@ def teacher_login_checked(username, password):
 
 
 def get_subject_attendance_stats(subject_id):
-    """One query -> {student_id: {'total': n, 'present': n}} (replaces per-student queries)."""
-    response = supabase.table('attendance_logs')\
-        .select('student_id, is_present, status')\
-        .eq('subject_id', subject_id).execute()
+    """{student_id: {'total': n, 'present': n}} for one subject.
+    Paginated (no 1000-row cap); cancelled classes and excused absences are left out."""
+    rows = _fetch_all(
+        lambda: supabase.table('attendance_logs')
+        .select('student_id, is_present, status')
+        .eq('subject_id', subject_id),
+        order=('timestamp', 'student_id'))
     stats = {}
-    for row in eligible(response.data):
+    for row in eligible(rows):
         s = stats.setdefault(row['student_id'], {'total': 0, 'present': 0})
         s['total'] += 1
         if row.get('is_present'):
