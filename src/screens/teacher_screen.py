@@ -313,7 +313,7 @@ def teacher_tab_manage_subjects():
 
             # default-arg binding so each card's button uses ITS OWN subject
             def share_btn(sub=sub):
-                if st.button(f"Share Code: {sub['name']}", key=f"share_{sub['subject_code']}", icon=":material/share:"):
+                if st.button(f"Share Code: {sub['name']}", key=f"share_{sub['subject_id']}", icon=":material/share:"):
                     share_subject_dialog(sub['name'], sub['subject_code'])
                 st.space()
 

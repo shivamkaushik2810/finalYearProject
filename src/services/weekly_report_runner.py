@@ -7,6 +7,7 @@ from src.database.fast_queries import (
     get_enrollments_for_students, get_logs_between,
 )
 from src.services.email_service import close_smtp
+from src.services.email_rules import emails_conflict
 from src.services.weekly_report_service import send_weekly_parent_email
 
 
@@ -25,7 +26,8 @@ def _flush(rows):
     return []
 
 
-def send_weekly_reports_to_all_parents():
+def send_weekly_reports_to_all_parents(force=False):
+    """force=True re-sends even to parents already emailed for the week."""
     ws, we = last_full_week()
     start_dt = datetime.combine(ws, datetime.min.time())
     end_dt = datetime.combine(we + timedelta(days=1), datetime.min.time())
@@ -54,6 +56,9 @@ def send_weekly_reports_to_all_parents():
         ))
     }
 
+    if force:
+        done = set()
+
     success = failed = 0
     pending = []
     try:
@@ -79,6 +84,10 @@ def send_weekly_reports_to_all_parents():
                 })
             if not any(r["total"] for r in reports):
                 continue  # no classes this week, skip the noise
+
+            if emails_conflict(s.get("email"), s.get("parent_email")):
+                print(f"  skipped {s.get('name')}: parent email is the same as the student email")
+                continue
 
             try:
                 send_weekly_parent_email(
