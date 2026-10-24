@@ -1,0 +1,26 @@
+{
+  "name": "ai-attendance-project-app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shivamkaushik2810/finalYearProject.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/shivamkaushik2810/finalYearProject/issues"
+  },
+  "homepage": "https://github.com/shivamkaushik2810/finalYearProject#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5"
+  }
+}
