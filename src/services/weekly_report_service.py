@@ -1,14 +1,7 @@
 import html as _html
-from datetime import datetime, timedelta, date
+from datetime import datetime
 
-from src.database.db import (
-    get_all_enrolled_students_with_parents,
-    get_subjects_for_student,
-    get_weekly_attendance,
-    save_weekly_report,
-    weekly_report_already_sent,
-)
-from src.services.email_service import _send
+from src.services.email_service import _send  # mail_pool swaps this name for a pooled sender
 
 
 def _esc(value):
@@ -19,13 +12,6 @@ def _fmt_date(d):
     if isinstance(d, str):
         d = datetime.fromisoformat(d).date()
     return d.strftime("%d %B %Y")
-
-
-def get_last_week_range(today=None):
-    """Last full Monday-Sunday week, correct whichever day it is called on."""
-    today = today or date.today()
-    this_monday = today - timedelta(days=today.weekday())
-    return this_monday - timedelta(days=7), this_monday - timedelta(days=1)
 
 
 def _status(pct):
@@ -48,16 +34,19 @@ def send_weekly_parent_email(parent_name, parent_email, student_name, roll_no,
     total_all = present_all = 0
     for r in subject_reports:
         pct = r["attendance_pct"]
-        color, status = _status(pct)
+        if not r["total"]:
+            color, status, pct = "#888888", "No classes", "—"
+        else:
+            color, status = _status(pct)
         rows_html += (
             "<tr>"
             f"<td style='padding:10px 12px;border-bottom:1px solid #eee;font-size:13px;color:#333;'>{_esc(r['subject_name'])}</td>"
             f"<td style='padding:10px 12px;border-bottom:1px solid #eee;font-size:13px;text-align:center;'>{r['attended']}/{r['total']}</td>"
-            f"<td style='padding:10px 12px;border-bottom:1px solid #eee;font-size:13px;text-align:center;font-weight:bold;color:{color};'>{pct}%</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #eee;font-size:13px;text-align:center;font-weight:bold;color:{color};'>{pct}{'%' if r['total'] else ''}</td>"
             f"<td style='padding:10px 12px;border-bottom:1px solid #eee;font-size:13px;text-align:center;'>{status}</td>"
             "</tr>"
         )
-        rows_plain += f"  {r['subject_name']}: {r['attended']}/{r['total']} ({pct}%) — {status}\n"
+        rows_plain += f"  {r['subject_name']}: {r['attended']}/{r['total']} ({pct}{'%' if r['total'] else ''}) — {status}\n"
         total_all += r["total"]
         present_all += r["attended"]
 
@@ -127,71 +116,3 @@ This is an automated weekly report from SnapClass.
 </table></td></tr></table></body></html>"""
 
     _send(parent_email, f"📊 Weekly Attendance Report — {student_name} | {ws} to {we}", html, plain)
-
-
-def send_weekly_reports_to_all_parents():
-    """Send last week's report to each parent once. Returns (success, failed)."""
-    week_start, week_end = get_last_week_range()
-    start_iso = f"{week_start.isoformat()}T00:00:00"                         # inclusive
-    end_iso = f"{(week_end + timedelta(days=1)).isoformat()}T00:00:00"      # exclusive
-    print(f"Weekly reports for {week_start} to {week_end}")
-
-    success = failed = skipped = 0
-    for student in get_all_enrolled_students_with_parents() or []:
-        sid = student.get("student_id")
-        try:
-            parent_email = (student.get("parent_email") or "").strip()
-            if not sid or not parent_email:
-                skipped += 1
-                continue
-            if weekly_report_already_sent(sid, week_start):
-                skipped += 1
-                continue
-
-            reports = []
-            for node in get_subjects_for_student(sid) or []:
-                sub = node.get("subjects")
-                if not sub:
-                    continue
-                logs = get_weekly_attendance(sid, sub["subject_id"], start_iso, end_iso) or []
-                total = len(logs)
-                if total == 0:          # no class held: nothing to report
-                    continue
-                attended = sum(1 for l in logs if l.get("is_present"))
-                reports.append({
-                    "subject_id": sub["subject_id"],
-                    "subject_name": sub.get("name", "Subject"),
-                    "subject_code": sub.get("subject_code", ""),
-                    "total": total,
-                    "attended": attended,
-                    "absent": total - attended,
-                    "attendance_pct": round(attended / total * 100, 1),
-                })
-            if not reports:
-                skipped += 1
-                continue
-
-            send_weekly_parent_email(
-                parent_name=student.get("parent_name"),
-                parent_email=parent_email,
-                student_name=student.get("name", "Student"),
-                roll_no=student.get("roll_no"),
-                section=student.get("section"),
-                subject_reports=reports,
-                week_start=week_start,
-                week_end=week_end,
-            )
-            success += 1
-            # Record only AFTER the email was really sent.
-            try:
-                for r in reports:
-                    save_weekly_report(sid, r["subject_id"], week_start, week_end,
-                                       r["total"], r["attended"], r["absent"], r["attendance_pct"])
-            except Exception as e:
-                print(f"  ⚠️ Email sent but report not recorded for student {sid}: {type(e).__name__}")
-        except Exception as e:
-            failed += 1
-            print(f"  ❌ Weekly report failed for student {sid}: {type(e).__name__}")
-
-    print(f"Done. Success: {success}, Failed: {failed}, Skipped: {skipped}")
-    return success, failed
