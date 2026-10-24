@@ -5,6 +5,7 @@ import numpy as np
 import streamlit as st
 
 from src.database.config import supabase
+from src.services.session_guard import session_locked, format_remaining
 from src.components import qr_session as qs
 from src.components.attendance_scans import record_many, session_id_of
 from src.components.nfc_attendance import nfc_panel
@@ -103,18 +104,12 @@ def _start_card(subject, teacher_id):
     st.markdown("### Start an attendance session")
     st.caption("One session covers every method: QR code, NFC / ID card, class photos and voice. "
                "At the end you review a single list and confirm once. A student can only be saved once per session.")
-    allow = True
-    try:
-        today = datetime.now().strftime("%Y-%m-%dT00:00:00")
-        last = supabase.table('attendance_logs').select('timestamp')\
-            .eq('subject_id', subject_id).gte('timestamp', today)\
-            .order('timestamp', desc=True).limit(1).execute().data
-        if last:
-            st.warning(f"Attendance for this subject was already saved today (around {str(last[0]['timestamp'])[11:16]}).")
-            allow = st.checkbox("This is a second class today - start another session",
-                                key=f"hub_second_{subject_id}")
-    except Exception:
-        pass
+    locked, remaining = session_locked(subject_id)
+    allow = not locked
+    if locked:
+        st.warning(f"⏳ A session was already completed for this subject. "
+                   f"Next session can start in {format_remaining(remaining)}.")
+        st.button("Refresh timer", icon=":material/refresh:", key=f"hub_refresh_{subject_id}")
     st.caption(f"The QR code is accepted for {qs.SESSION_MINUTES} minutes and changes every {qs.ROTATE_SECONDS} seconds. "
                "Photos, voice and NFC can still be added during the review.")
     if st.button("Start attendance session", type="primary", icon=":material/play_circle:",

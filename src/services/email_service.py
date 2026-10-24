@@ -1,4 +1,5 @@
 import smtplib
+import threading
 import html as _html
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -13,7 +14,32 @@ def _get_config():
     }
 
 
+_conn = None
+_lock = threading.Lock()
+
+
+def _connect(config):
+    srv = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
+    srv.ehlo()
+    srv.starttls()
+    srv.ehlo()
+    srv.login(config["sender_email"], config["sender_password"])
+    return srv
+
+
+def close_smtp():
+    global _conn
+    with _lock:
+        if _conn is not None:
+            try:
+                _conn.quit()
+            except Exception:
+                pass
+            _conn = None
+
+
 def _send(to_email, subject, html, plain):
+    global _conn
     config = _get_config()
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -21,10 +47,23 @@ def _send(to_email, subject, html, plain):
     msg["To"]      = to_email
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html,  "html"))
-    with smtplib.SMTP("smtp.gmail.com", 587) as s:
-        s.ehlo(); s.starttls()
-        s.login(config["sender_email"], config["sender_password"])
-        s.sendmail(config["sender_email"], to_email, msg.as_string())
+    data = msg.as_string()
+    with _lock:
+        for attempt in (1, 2):
+            try:
+                if _conn is None:
+                    _conn = _connect(config)
+                _conn.sendmail(config["sender_email"], to_email, data)
+                return
+            except (smtplib.SMTPServerDisconnected, OSError):
+                try:
+                    if _conn is not None:
+                        _conn.close()
+                except Exception:
+                    pass
+                _conn = None
+                if attempt == 2:
+                    raise
 
 
 def _fmt(ts):

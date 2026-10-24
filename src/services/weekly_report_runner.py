@@ -1,127 +1,122 @@
-import os
-from datetime import date, timedelta
-from src.database.db import (
-    get_all_enrolled_students_with_parents,
-    get_enrolled_subjects_map,
-    get_weekly_attendance_bulk,
-    get_reported_student_ids,
-    save_weekly_reports_bulk,
-)
-from src.services.weekly_report_service import send_weekly_parent_email
-from src.services.mail_pool import pooled_smtp
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 
-MAX_EMAILS_PER_RUN = int(os.getenv("MAX_EMAILS_PER_RUN", "450"))   # Gmail daily limit safety
-DRY_RUN = os.getenv("DRY_RUN") == "1"
-TEST_EMAIL_TO = os.getenv("TEST_EMAIL_TO")                          # test mode: all mail goes here
-TEST_LIMIT = int(os.getenv("TEST_LIMIT", "3"))
+from src.database.config import supabase
+from src.database.fast_queries import (
+    paginate, get_students_with_parents,
+    get_enrollments_for_students, get_logs_between,
+)
+from src.services.email_service import close_smtp
+from src.services.email_rules import emails_conflict
+from src.services.weekly_report_service import send_weekly_parent_email
 
 
 def last_full_week(today=None):
-    """Previous Monday-Sunday, whichever day of the week this runs."""
     today = today or date.today()
-    this_monday = today - timedelta(days=today.weekday())
-    return this_monday - timedelta(days=7), this_monday - timedelta(days=1)
+    start = today - timedelta(days=today.weekday() + 7)  # last Monday
+    return start, start + timedelta(days=6)              # last Sunday
 
 
-def report_week(mode="last", today=None):
-    today = today or date.today()
-    if mode == "current":
-        return today - timedelta(days=today.weekday()), today
-    return last_full_week(today)
+def _flush(rows):
+    if rows:
+        try:
+            supabase.table("weekly_reports").insert(rows).execute()
+        except Exception as e:
+            print(f"  weekly_reports save failed: {e}")
+    return []
 
 
 def send_weekly_reports_to_all_parents(force=False):
-    mode = os.getenv("REPORT_WEEK", "last").lower()
-    if mode == "current" and not TEST_EMAIL_TO:
-        raise ValueError(
-            "REPORT_WEEK=current needs TEST_EMAIL_TO=<your address>. "
-            "Reports for a partial week must never go to real parents.")
+    """force=True re-sends even to parents already emailed for the week."""
+    ws, we = last_full_week()
+    start_dt = datetime.combine(ws, datetime.min.time())
+    end_dt = datetime.combine(we + timedelta(days=1), datetime.min.time())
+    print(f"Weekly reports for {ws} to {we}")
 
-    test = bool(TEST_EMAIL_TO)
-    week_start, week_end = report_week(mode)
-    tag = "  [DRY RUN]" if DRY_RUN else ("  [TEST -> " + TEST_EMAIL_TO + "]" if test else "")
-    print(f"Weekly reports for {week_start} to {week_end}{tag}")
-
-    students = get_all_enrolled_students_with_parents()
-    total_parents = len(students)
-    done = set()
-    if not force and not test:
-        done = get_reported_student_ids(week_start)
-        students = [s for s in students if s['student_id'] not in done]
-    print(f"Students with a parent email: {total_parents} | already reported: {len(done)} "
-          f"| to check: {len(students)}")
+    students = get_students_with_parents()
     if not students:
-        print("Nothing to send.")
         return 0, 0
 
-    subjects_map = get_enrolled_subjects_map()
-    counts = get_weekly_attendance_bulk(week_start, week_end)
-    limit = TEST_LIMIT if test else MAX_EMAILS_PER_RUN
+    enroll = get_enrollments_for_students([s["student_id"] for s in students])
 
-    success, failed, no_classes, pending = 0, 0, 0, []
+    counts = defaultdict(lambda: [0, 0])  # (student, subject) -> [total, present]
+    for l in get_logs_between(start_dt, end_dt):
+        c = counts[(l["student_id"], l["subject_id"])]
+        c[0] += 1
+        if l.get("is_present"):
+            c[1] += 1
+
+    done = {
+        (r["student_id"], r["subject_id"])
+        for r in paginate(lambda: (
+            supabase.table("weekly_reports")
+            .select("student_id,subject_id")
+            .eq("week_start", str(ws)).eq("email_sent", True)
+            .order("student_id").order("subject_id")
+        ))
+    }
+
+    if force:
+        done = set()
+
+    success = failed = 0
+    pending = []
     try:
-        with pooled_smtp():
-            for stu in students:
-                if success >= limit:
-                    print(f"Limit of {limit} emails reached. "
-                          f"The rest will be sent on the next run.")
-                    break
-                sid = stu['student_id']
-                try:
-                    if not stu.get('parent_email'):
-                        continue
-                    if not TEST_EMAIL_TO and stu['parent_email'].strip().lower().endswith('.invalid'):
-                        continue   # QA/test addresses never receive real mail
-                    reports, rows = [], []
-                    for sub in subjects_map.get(sid, []):
-                        total, attended = counts.get((sid, sub['subject_id']), (0, 0))
-                        if total == 0:
-                            continue
-                        absent = total - attended
-                        pct = round(attended / total * 100, 1)
-                        reports.append({
-                            'subject_name': sub['name'], 'subject_code': sub['subject_code'],
-                            'total': total, 'attended': attended,
-                            'absent': absent, 'attendance_pct': pct
-                        })
-                        rows.append({
-                            'student_id': sid, 'subject_id': sub['subject_id'],
-                            'week_start': str(week_start), 'week_end': str(week_end),
-                            'total_classes': total, 'attended': attended,
-                            'absent': absent, 'attendance_pct': pct, 'email_sent': True
-                        })
-                    if not reports:
-                        no_classes += 1
-                        continue
+        for s in students:
+            sid = s["student_id"]
+            subs = enroll.get(sid, [])
+            if not subs:
+                continue
+            if all((sid, sub["subject_id"]) in done for sub in subs):
+                continue  # already emailed this week
 
-                    to_addr = TEST_EMAIL_TO or stu['parent_email']
-                    if DRY_RUN:
-                        print(f"  [dry] would email {to_addr} for {stu['name']}")
-                        success += 1
-                        continue
+            reports = []
+            for sub in subs:
+                total, att = counts.get((sid, sub["subject_id"]), (0, 0))
+                reports.append({
+                    "subject_id": sub["subject_id"],
+                    "subject_name": sub["name"],
+                    "subject_code": sub["subject_code"],
+                    "total": total,
+                    "attended": att,
+                    "absent": total - att,
+                    "attendance_pct": round(att / total * 100, 1) if total else 0,
+                })
+            if not any(r["total"] for r in reports):
+                continue  # no classes this week, skip the noise
 
-                    send_weekly_parent_email(
-                        parent_name=stu.get('parent_name') or 'Parent',
-                        parent_email=to_addr,
-                        student_name=stu['name'],
-                        roll_no=stu.get('roll_no') or 'N/A',
-                        section=stu.get('section') or 'N/A',
-                        subject_reports=reports,
-                        week_start=week_start, week_end=week_end
-                    )
-                    if not test:
-                        pending.extend(rows)   # saved only after the email really went out
-                    success += 1
-                    if len(pending) >= 500:
-                        save_weekly_reports_bulk(pending)
-                        pending = []
-                except Exception as e:
-                    failed += 1
-                    print(f"  ❌ Failed for {stu.get('name', 'Unknown')}: {e}")
+            if emails_conflict(s.get("email"), s.get("parent_email")):
+                print(f"  skipped {s.get('name')}: parent email is the same as the student email")
+                continue
+
+            try:
+                send_weekly_parent_email(
+                    parent_name=s.get("parent_name") or "Parent",
+                    parent_email=s["parent_email"],
+                    student_name=s["name"],
+                    roll_no=s.get("roll_no") or "N/A",
+                    section=s.get("section") or "N/A",
+                    subject_reports=reports,
+                    week_start=ws, week_end=we,
+                )
+            except Exception as e:
+                failed += 1
+                print(f"  failed for {s.get('name')}: {e}")
+                continue
+
+            success += 1
+            pending += [{
+                "student_id": sid, "subject_id": r["subject_id"],
+                "week_start": str(ws), "week_end": str(we),
+                "total_classes": r["total"], "attended": r["attended"],
+                "absent": r["absent"], "attendance_pct": r["attendance_pct"],
+                "email_sent": True,
+            } for r in reports]
+            if len(pending) >= 100:
+                pending = _flush(pending)
     finally:
-        if pending:
-            save_weekly_reports_bulk(pending)
+        _flush(pending)
+        close_smtp()
 
-    print(f"Skipped (no classes in {week_start} to {week_end}): {no_classes}")
-    print(f"Done! Success: {success}, Failed: {failed}")
+    print(f"Done. Success: {success}, Failed: {failed}")
     return success, failed

@@ -83,7 +83,7 @@ def student_analytics_tab():
         return
     except Exception as e:
         _log_error("sections", e)
-        st.error("Could not load the class list. Please try again.")
+        st.error("Could not load sections. Please try again.")
         return
     if not sections:
         st.info("No students with a section were found.")
@@ -106,7 +106,7 @@ def student_analytics_tab():
     with c3:
         section_key = st.selectbox("Section", sorted(valid.keys()), index=None, placeholder="Select a section",
                                    format_func=lambda k: f"Section {k} ({sec_counts[_n(k)]} students)",
-                                   key=f"sa_section_{course}_{year}")
+                                   key="sa_section")
     if not section_key:
         st.info("Select a course, year and section to begin.")
         return
@@ -134,7 +134,7 @@ def student_analytics_tab():
 
     student_id = st.selectbox("Student", list(by_id.keys()), index=None, placeholder="Select a student",
                               format_func=lambda i: f"{by_id[i]['name']} - {by_id[i].get('roll_no') or 'N/A'}",
-                              key=f"sa_student_{section_key}_{course}_{year}_{search}")
+                              key=f"sa_student_{section_key}")
     if student_id is None:
         st.info("Select a student to load their analytics.")
         return

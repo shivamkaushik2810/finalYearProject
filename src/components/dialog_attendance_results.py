@@ -2,6 +2,7 @@ import streamlit as st
 from src.database.db import create_attendance
 from src.database.config import supabase
 from src.services.email_service import send_all_attendance_emails
+from src.services.session_guard import session_locked, format_remaining
 import time
 
 
@@ -20,6 +21,11 @@ def show_attendance_result(df, logs):
     with col2:
         if st.button('Confirm & Save', width='stretch', type='primary'):
             try:
+                if logs:
+                    locked, remaining = session_locked(logs[0]['subject_id'])
+                    if locked:
+                        st.error(f"Session already recorded. Next session in {format_remaining(remaining)}.")
+                        return
                 create_attendance(logs)
                 st.toast("✅ Attendance saved!")
                 _learn_from_confirmed(logs)
