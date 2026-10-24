@@ -8,6 +8,7 @@ from src.database.db import (
     save_weekly_reports_bulk,
 )
 from src.services.weekly_report_service import send_weekly_parent_email
+from src.services.email_rules import emails_conflict
 from src.services.mail_pool import pooled_smtp
 
 MAX_EMAILS_PER_RUN = int(os.getenv("MAX_EMAILS_PER_RUN", "450"))   # Gmail daily limit safety
@@ -72,6 +73,9 @@ def send_weekly_reports_to_all_parents(force=False):
                         continue
                     if not TEST_EMAIL_TO and stu['parent_email'].strip().lower().endswith('.invalid'):
                         continue   # QA/test addresses never receive real mail
+                    if not TEST_EMAIL_TO and emails_conflict(stu.get('email'), stu.get('parent_email')):
+                        print(f"  skipped {stu.get('name', 'Unknown')}: parent email is the same as the student email")
+                        continue
                     reports, rows = [], []
                     for sub in subjects_map.get(sid, []):
                         total, attended = counts.get((sid, sub['subject_id']), (0, 0))

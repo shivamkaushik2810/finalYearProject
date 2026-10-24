@@ -66,3 +66,16 @@ scan_truncation.py
 patch_truncation.py
 *.bak_trunc
 *.before_status
+
+*.bak
+*.bak[0-9]
+*.bak_trunc
+*.speedup.bak
+*.old
+*.old[0-9]
+*.backup
+backups/
+backup_*/
+.coverage
+htmlcov/
+.pytest_cache/

@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 import bcrypt
+from src.services.email_rules import emails_conflict
 import streamlit as st
 from src.database.config import supabase
 
@@ -81,6 +82,9 @@ def count_students():
 def create_student(new_name, face_embedding=None, voice_embedding=None,
                    email=None, roll_no=None, section=None,
                    parent_email=None, parent_name=None, year=None, course=None):
+    if email and parent_email and emails_conflict(email, parent_email):
+        raise ValueError("Student email and parent email must be different.")
+
     data = {
         'name': new_name, 'face_embedding': face_embedding,
         'voice_embedding': voice_embedding, 'email': email,
