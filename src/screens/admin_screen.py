@@ -8,6 +8,9 @@ from src.components.footer import footer_dashboard
 from src.components.timetable import admin_timetable_manager
 from src.components.student_analytics_ui import student_analytics_tab
 from src.components.term_manager import admin_term_manager
+from src.components.section_analytics import show_section_analytics
+from src.components.teacher_session_history import show_teacher_session_history
+from src.components.defaulter_emails import show_defaulter_email_panel
 from src.components.child_overview import _classes_needed, REQUIRED_PCT
 from src.database.config import supabase
 from src.database.attendance_status import eligible
@@ -255,7 +258,7 @@ def admin_dashboard():
             st.rerun()
 
     pending_n = len(get_teachers_by_status('pending'))
-    t1, t2, t3, t4, t5 = st.tabs([f"Teacher Approvals ({pending_n})", "Overview & Reports", "Timetable", "Student Analytics", "Academic Terms"])
+    t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs([f"Teacher Approvals ({pending_n})", "Overview & Reports", "Timetable", "Student Analytics", "Academic Terms", "Section Analytics", "Teacher Sessions", "Defaulter Emails"])
     with t1:
         _approvals_tab()
     with t2:
@@ -266,5 +269,14 @@ def admin_dashboard():
         student_analytics_tab()
     with t5:
         admin_term_manager()
+    with t6:
+        try:
+            show_section_analytics()
+        except Exception as e:
+            st.error(f"Section analytics failed: {e}")
+    with t7:
+        show_teacher_session_history()
+    with t8:
+        show_defaulter_email_panel(teacher_id=None, key="admin_def")
 
     footer_dashboard()

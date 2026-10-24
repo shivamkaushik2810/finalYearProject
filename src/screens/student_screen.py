@@ -1,3 +1,4 @@
+from src.pipelines.face_index import invalidate_face_index
 import streamlit as st
 
 from src.ui.base_layout import style_background_dashboard, style_base_layout
@@ -329,6 +330,7 @@ def student_screen():
                             )
                             if response_data:
                                 train_classifier()
+                                invalidate_face_index()
                                 st.session_state.is_logged_in = True
                                 st.session_state.user_role    = 'student'
                                 st.session_state.student_data = response_data[0]

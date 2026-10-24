@@ -10,6 +10,21 @@ from src.database.config import supabase
 
 
 def show_teacher_marks(subjects, teacher_id):
+    st.markdown("""
+        <style>
+        div[data-testid="stNumberInput"] button {
+            padding: 0 !important;
+            min-width: 2rem !important;
+            width: 2rem !important;
+            height: 2rem !important;
+            border-radius: 0.5rem !important;
+        }
+        div[data-testid="stNumberInput"] input {
+            font-weight: 600;
+            min-width: 3.5rem;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     st.header("📝 Subject Marks")
     st.caption("Leave a student's marks blank if they have not been entered. A typed 0 is saved as a real zero.")
 
@@ -36,8 +51,8 @@ def show_teacher_marks(subjects, teacher_id):
         )
     with col2:
         max_marks = st.number_input(
-            "Maximum Marks", min_value=1, max_value=1000,
-            value=100, key='max_marks_input'
+            "Maximum Marks", min_value=1.0, max_value=1000.0,
+            value=100.0, step=0.5, format="%.1f", key='max_marks_input'
         )
 
     enrolled_res = supabase.table('subject_students')\
@@ -70,7 +85,7 @@ def show_teacher_marks(subjects, teacher_id):
         unverified = existing.get('entry_status') == 'unverified'
 
         with st.container(border=True):
-            col1, col2, col3, col4 = st.columns([3, 2, 2, 3])
+            col1, col2, col3, col4 = st.columns([3, 3, 1.5, 3])
             with col1:
                 st.write(f"**{student['name']}**")
                 st.caption(
@@ -86,7 +101,9 @@ def show_teacher_marks(subjects, teacher_id):
                     start_value = min(float(existing.get('marks_obtained', 0)), float(max_marks))
                 marks_input = st.number_input(
                     "Marks", min_value=0.0, max_value=float(max_marks), value=start_value,
-                    placeholder="Not entered", key=f"marks_{sid}_{exam_type}", label_visibility="collapsed"
+                    placeholder="Not entered", key=f"marks_{sid}_{exam_type}", label_visibility="collapsed",
+                    step=0.5,
+                    format="%.1f"
                 )
             with col3:
                 if marks_input is None:

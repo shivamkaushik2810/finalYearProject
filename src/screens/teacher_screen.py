@@ -148,6 +148,11 @@ def teacher_tab_ai_insights(subjects, teacher_id):
             st.metric("Next Auto Send", "Every Monday")
     st.divider()
 
+    with st.expander("🚨 Defaulter Students — Email Parents"):
+        from src.components.defaulter_emails import show_defaulter_email_panel
+        show_defaulter_email_panel(teacher_id=teacher_id, key="teacher_def")
+    st.divider()
+
     if not subjects:
         st.info("Create a subject first to see AI insights.")
         return
@@ -213,8 +218,80 @@ def teacher_tab_take_attendance():
 
 
 def teacher_tab_enrolled_students():
-    from src.components.class_filters_ui import teacher_tab_enrolled_students as _impl
-    _impl()
+    """Show enrolled students list for each subject"""
+    from collections import defaultdict
+    from src.database.config import supabase
+
+    teacher_id = st.session_state.teacher_data['teacher_id']
+    subjects   = get_teacher_subjects(teacher_id)
+
+    st.header("👥 Enrolled Students")
+
+    if not subjects:
+        st.info("No subjects created yet. Create a subject first.")
+        return
+
+    subject_options = {f"{s['name']} - {s['subject_code']}": s for s in subjects}
+    selected_label  = st.selectbox("Select Subject", list(subject_options.keys()), key='enroll_list_sub')
+
+    if selected_label:
+        selected_sub = subject_options[selected_label]
+        sid          = selected_sub['subject_id']
+
+        res = supabase.table('subject_students').select('*, students(student_id, name, email, roll_no, section, parent_email)').eq('subject_id', sid).execute()
+        enrolled = [n['students'] for n in (res.data or []) if n.get('students')]
+
+        # ONE query for all attendance, grouped: student_id -> [present, total]
+        att = defaultdict(lambda: [0, 0])
+        att_rows = supabase.table('attendance_logs').select('student_id, is_present').eq('subject_id', sid).execute().data or []
+        for l in att_rows:
+            att[l['student_id']][1] += 1
+            if l.get('is_present'):
+                att[l['student_id']][0] += 1
+
+        st.divider()
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Enrolled", len(enrolled))
+        with col2:
+            st.metric("With Email", sum(1 for s in enrolled if s.get('email')))
+        with col3:
+            st.metric("With Parent Email", sum(1 for s in enrolled if s.get('parent_email')))
+
+        st.divider()
+
+        if not enrolled:
+            st.warning("No students enrolled in this subject yet.")
+            return
+
+        st.subheader(f"📋 Student List — {selected_sub['name']} ({selected_sub['subject_code']})")
+
+        search = st.text_input("🔍 Search student", placeholder="Type name or roll no...")
+
+        filtered = enrolled
+        if search:
+            q = search.lower()
+            filtered = [s for s in enrolled if
+                        q in (s.get('name') or '').lower() or
+                        q in (s.get('roll_no') or '').lower()]
+
+        for i, student in enumerate(filtered):
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+                with c1:
+                    st.write(f"**{i+1}. {student.get('name', 'Unknown')}**")
+                    st.caption(f"Roll No: {student.get('roll_no', 'N/A')} | Section: {student.get('section', 'N/A')}")
+                with c2:
+                    st.write(f"📧 {student.get('email') or 'No email'}")
+                with c3:
+                    st.write(f"👨‍👩‍👧 {student.get('parent_email') or 'No parent email'}")
+                with c4:
+                    present, total = att[student['student_id']]
+                    pct   = round((present / total) * 100) if total > 0 else 0
+                    color = "🟢" if pct >= 75 else "🟡" if pct >= 50 else "🔴"
+                    st.write(f"{color} {present}/{total} ({pct}%)")
+
 
 def teacher_tab_manage_subjects():
     teacher_id = st.session_state.teacher_data['teacher_id']
