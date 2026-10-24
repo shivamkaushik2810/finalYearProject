@@ -47,14 +47,14 @@ def test_database_failure_is_reported_not_crashed(fake_db):
     at = _at()
     at.session_state["admin_data"] = {"id": 1}
     at.run()
-    assert not at.exception and any("Could not load sections" in e.value for e in at.error)
+    assert not at.exception and any("Could not load the class list" in e.value for e in at.error)
 
 
 def test_selecting_section_and_student_shows_correct_kpis(admin_app):
     at = admin_app.run()
     assert not at.exception
-    at.selectbox(key="sa_section").select_index(0).run()
-    at.selectbox(key="sa_student_A").select_index(0).run()
+    next(s for s in at.selectbox if s.label == "Section").select_index(0).run()
+    _student(at).select_index(0).run()
     assert not at.exception
     values = {m.label: m.value for m in at.metric}
     assert values["Overall attendance"] == "75.0%"          # 15 of 20 classes
@@ -62,19 +62,24 @@ def test_selecting_section_and_student_shows_correct_kpis(admin_app):
 
 def test_changing_section_clears_the_student(admin_app):
     at = admin_app.run()
-    at.selectbox(key="sa_section").select_index(0).run()
-    at.selectbox(key="sa_student_A").select_index(0).run()
-    at.selectbox(key="sa_section").select_index(1).run()
-    assert at.selectbox(key="sa_student_B").value is None
+    next(s for s in at.selectbox if s.label == "Section").select_index(0).run()
+    _student(at).select_index(0).run()
+    next(s for s in at.selectbox if s.label == "Section").select_index(1).run()
+    assert _student(at).value is None
     assert "Overall attendance" not in {m.label for m in at.metric}
 
 
 def test_multiple_chart_types_render_together(admin_app):
     at = admin_app.run()
-    at.selectbox(key="sa_section").select_index(0).run()
-    at.selectbox(key="sa_student_A").select_index(0).run()
+    next(s for s in at.selectbox if s.label == "Section").select_index(0).run()
+    _student(at).select_index(0).run()
     at.multiselect(key="sa_charts_1").select("Pie").select("Stacked bar").run()
     assert not at.exception
     headings = [md.value for md in at.markdown]
     for kind in ("Bar", "Line", "Pie", "Stacked bar"):
         assert any(h.startswith(f"**{kind}:") for h in headings)
+
+
+def _student(at):
+    """Student selectbox; its key embeds the active filters, so find it by label."""
+    return next(s for s in at.selectbox if s.label == "Student")

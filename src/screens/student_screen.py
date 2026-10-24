@@ -12,6 +12,7 @@ from src.pipelines.liveness_detection import detect_screen_or_photo, check_face_
 from src.database.db import get_student_by_id, get_all_students, create_student, get_student_subjects, get_student_attendance, unenroll_student_to_subject
 from src.services.otp_service import send_and_save_otp, verify_otp, is_email_verified, mark_email_verified
 from src.services.email_rules import emails_conflict, is_valid_email
+from src.services.parent_email_rules import validate_parent_email
 import time
 from src.components.liveness_challenge import run_liveness_challenge
 
@@ -306,6 +307,8 @@ def student_screen():
                     st.error('Please enter your email!')
                 elif not parent_email:
                     st.error('Please enter parent email!')
+                elif not validate_parent_email(new_email, parent_email)[0]:
+                    st.error(validate_parent_email(new_email, parent_email)[1])
                 elif not is_valid_email(new_email) or not is_valid_email(parent_email):
                     st.error('Please enter valid email addresses!')
                 elif emails_conflict(new_email, parent_email):
