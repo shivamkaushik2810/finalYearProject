@@ -66,3 +66,17 @@ scan_truncation.py
 patch_truncation.py
 *.bak_trunc
 *.before_status
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+.env
+.env.*
+!.env.example
+set_email_password.py
+test_email.py
+test_email2.py
