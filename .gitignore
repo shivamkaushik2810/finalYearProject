@@ -79,3 +79,5 @@ backup_*/
 .coverage
 htmlcov/
 .pytest_cache/
+
+node_modules/
