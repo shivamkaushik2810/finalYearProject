@@ -1,4 +1,5 @@
 import streamlit as st
+from src.components.parent_email_update import show_parent_email_update
 
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 from src.components.header import header_dashboard
@@ -39,6 +40,7 @@ def student_dashboard():
             st.rerun()
 
     st.space()
+    show_parent_email_update(student_data)
 
     if st.query_params.get('qr-code'):
         student_qr_panel(student_data, key_prefix='qr_top')
