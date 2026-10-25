@@ -3,7 +3,23 @@ name: Weekly parent reports
 on:
   schedule:
     - cron: "30 3 * * 1-3"      # Mon-Wed 03:30 UTC = 09:00 IST (extra days finish what the daily Gmail cap left)
-  workflow_dispatch:             # lets you run it from the GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      test_email:
+        description: "Send ALL mail to this address only (test mode). Empty = real parents."
+        required: false
+        default: ""
+      current_week:
+        description: "Use the current week (needs test_email)"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Dry run: build reports but send nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
 
 jobs:
   send:
@@ -30,5 +46,15 @@ jobs:
           mkdir -p .streamlit
           printf 'SUPABASE_URL = "%s"\nSUPABASE_KEY = "%s"\nEMAIL_ADDRESS = "%s"\nEMAIL_PASSWORD = "%s"\n' \
             "$SUPABASE_URL" "$SUPABASE_KEY" "$EMAIL_ADDRESS" "$EMAIL_PASSWORD" > .streamlit/secrets.toml
+          chmod 600 .streamlit/secrets.toml
 
-      - run: python scripts/send_weekly_reports.py
+      - name: Send weekly reports
+        env:
+          IN_TEST_EMAIL: ${{ inputs.test_email }}
+          IN_CURRENT_WEEK: ${{ inputs.current_week }}
+          IN_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ -n "$IN_TEST_EMAIL" ]; then export TEST_EMAIL_TO="$IN_TEST_EMAIL"; fi
+          if [ "$IN_CURRENT_WEEK" = "true" ]; then export REPORT_WEEK=current; fi
+          if [ "$IN_DRY_RUN" = "true" ]; then export DRY_RUN=1; fi
+          python scripts/send_weekly_reports.py
