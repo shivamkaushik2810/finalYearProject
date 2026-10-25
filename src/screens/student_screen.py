@@ -115,6 +115,9 @@ def student_dashboard():
     with tab3:
         show_student_marks(student_id)
 
+    from src.components.feedback import show_feedback_section
+    show_feedback_section("student", student_id, student_data["name"])
+
     footer_dashboard()
 
 

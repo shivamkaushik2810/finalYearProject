@@ -96,6 +96,7 @@ def teacher_dashboard():
         (tab5, "marks",             "Marks",             ":material/grade:"),
         (tab6, "ai_insights",       "AI Insights",       ":material/smart_toy:"),
         (tab7, "analytics", "Analytics", ":material/monitoring:"),
+        
     ]
     for tab, key, label, icon in tabs:
         with tab:
@@ -122,6 +123,9 @@ def teacher_dashboard():
     elif current == "analytics":
         teacher_analytics_tab(subjects, teacher_id)
 
+    from src.components.feedback import show_feedback_section
+    show_feedback_section("teacher", teacher_id, teacher_name)
+
     footer_dashboard()
 
 
@@ -146,6 +150,11 @@ def teacher_tab_ai_insights(subjects, teacher_id):
                     st.success(f"✅ Sent {success} report(s).")
         with col2:
             st.metric("Next Auto Send", "Every Monday")
+    st.divider()
+
+    with st.expander("🚨 Defaulter Students — Email Parents"):
+        from src.components.defaulter_emails import show_defaulter_email_panel
+        show_defaulter_email_panel(teacher_id=teacher_id, key="teacher_def")
     st.divider()
 
     if not subjects:
