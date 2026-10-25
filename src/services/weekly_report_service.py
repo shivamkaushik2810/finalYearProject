@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, date
+from html import escape as _html_escape
 import html as _html
 from src.database.config import supabase
 from src.database.db import (
@@ -8,6 +9,11 @@ from src.database.db import (
     save_weekly_report
 )
 from src.services.email_service import _send
+
+
+def _esc(v):
+    """HTML-escape a possibly-None value for safe use in email HTML."""
+    return "" if v is None else _html_escape(str(v))
 
 
 def _fmt_date(d):
@@ -195,35 +201,42 @@ This is an automated weekly report from SnapClass.
     )
 
 
+def _already_reported(student_id, week_start):
+    """True if a weekly report row already exists for this student+week.
+    Raises on DB error so the caller fails closed (no duplicate email)."""
+    res = supabase.table('weekly_reports')\
+        .select('student_id')\
+        .eq('student_id', student_id)\
+        .eq('week_start', str(week_start))\
+        .limit(1).execute()
+    return bool(res.data)
+
+
 def send_weekly_reports_to_all_parents():
     """
-    Send the report for the last full Mon-Sun week to every parent.
-    Safe to run repeatedly: students already reported for that week are skipped.
-    Returns (success, failed).
+    Send weekly reports to all parents (previous Monday-Sunday).
+    Idempotent per student+week. Returns (success, failed).
     """
-    from src.database.db import weekly_report_exists
-
     today      = date.today()
-    week_start = today - timedelta(days=today.weekday() + 7)   # last Monday
-    week_end   = week_start + timedelta(days=6)                # last Sunday
-    start_iso  = f"{week_start}T00:00:00"
-    end_excl   = f"{week_end + timedelta(days=1)}T00:00:00"    # whole Sunday included
+    week_end   = today - timedelta(days=1)
+    week_start = week_end - timedelta(days=6)
+    ts_start = f"{week_start}T00:00:00"
+    ts_end   = f"{week_end}T23:59:59"
 
     print(f"Sending weekly reports for {week_start} to {week_end}")
 
     students = get_all_enrolled_students_with_parents()
-    success, failed, skipped = 0, 0, 0
+    success = failed = skipped = 0
 
     for student in students:
         try:
             student_id   = student['student_id']
-            parent_email = (student.get('parent_email') or '').strip()
+            parent_email = student.get('parent_email')
             parent_name  = student.get('parent_name') or 'Parent'
 
-            if not parent_email or parent_email.lower().endswith('@example.com'):
+            if not parent_email:
                 continue
-
-            if weekly_report_exists(student_id, week_start):
+            if _already_reported(student_id, week_start):
                 skipped += 1
                 continue
 
@@ -236,53 +249,43 @@ def send_weekly_reports_to_all_parents():
                 sub = node.get('subjects')
                 if not sub:
                     continue
-
-                logs = get_weekly_attendance(student_id, sub['subject_id'], start_iso, end_excl)
-                logs = [l for l in logs if l.get('status') not in ('excused', 'cancelled')]
+                logs = get_weekly_attendance(
+                    student_id, sub['subject_id'], ts_start, ts_end)
                 total = len(logs)
                 if total == 0:
-                    continue   # no classes held -> don't show a misleading 0%
-
+                    continue
                 attended = sum(1 for l in logs if l.get('is_present'))
-                absent   = total - attended
-                pct      = round((attended / total) * 100, 1)
-
                 subject_reports.append({
                     'subject_id':     sub['subject_id'],
                     'subject_name':   sub['name'],
                     'subject_code':   sub['subject_code'],
                     'total':          total,
                     'attended':       attended,
-                    'absent':         absent,
-                    'attendance_pct': pct
+                    'absent':         total - attended,
+                    'attendance_pct': round((attended / total) * 100, 1)
                 })
 
             if not subject_reports:
                 continue
 
-            # 1) send the email first ...
             send_weekly_parent_email(
-                parent_name     = parent_name,
-                parent_email    = parent_email,
-                student_name    = student['name'],
-                roll_no         = student.get('roll_no') or 'N/A',
-                section         = student.get('section') or 'N/A',
-                subject_reports = subject_reports,
-                week_start      = week_start,
-                week_end        = week_end
-            )
-            # 2) ... and only then record it as sent
+                parent_name=parent_name, parent_email=parent_email,
+                student_name=student['name'],
+                roll_no=student.get('roll_no') or 'N/A',
+                section=student.get('section') or 'N/A',
+                subject_reports=subject_reports,
+                week_start=week_start, week_end=week_end)
+
             for r in subject_reports:
                 save_weekly_report(
                     student_id, r['subject_id'], week_start, week_end,
-                    r['total'], r['attended'], r['absent'], r['attendance_pct']
-                )
+                    r['total'], r['attended'], r['absent'], r['attendance_pct'])
             success += 1
-            print(f"  ✅ Sent to parent of {student['name']}")
+            print(f"  Sent weekly report for student_id={student_id}")
 
         except Exception as e:
             failed += 1
-            print(f"  ❌ Failed for {student.get('name', 'Unknown')}: {e}")
+            print(f"  Failed for student_id={student.get('student_id')}: {type(e).__name__}")
 
-    print(f"\nDone! Success: {success}, Failed: {failed}, Already sent: {skipped}")
+    print(f"\nDone! Success: {success}, Failed: {failed}, Skipped: {skipped}")
     return success, failed
