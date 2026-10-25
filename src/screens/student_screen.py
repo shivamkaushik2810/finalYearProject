@@ -1,4 +1,5 @@
 import streamlit as st
+from src.components.parent_email_update import show_parent_email_update
 
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 from src.components.header import header_dashboard
@@ -11,6 +12,8 @@ from src.pipelines.voice_pipeline import get_voice_embedding
 from src.pipelines.liveness_detection import detect_screen_or_photo, check_face_quality
 from src.database.db import get_student_by_id, get_all_students, create_student, get_student_subjects, get_student_attendance, unenroll_student_to_subject
 from src.services.otp_service import send_and_save_otp, verify_otp, is_email_verified, mark_email_verified
+from src.services.email_rules import emails_conflict, is_valid_email
+from src.services.parent_email_rules import validate_parent_email
 import time
 from src.components.liveness_challenge import run_liveness_challenge
 
@@ -37,6 +40,7 @@ def student_dashboard():
             st.rerun()
 
     st.space()
+    show_parent_email_update(student_data)
 
     if st.query_params.get('qr-code'):
         student_qr_panel(student_data, key_prefix='qr_top')
@@ -263,7 +267,10 @@ def student_screen():
 
             st.info("📧 Weekly attendance report sent to parent every Monday")
 
-            if parent_email and "@" in parent_email:
+            email_conflict = emails_conflict(new_email, parent_email)
+            if email_conflict:
+                st.error("❌ Parent email must be different from your own email. Enter your parent or guardian email.")
+            if parent_email and "@" in parent_email and not email_conflict:
                 st.write("**Verify Parent Email:**")
                 parent_verified = _otp_verify_section(
                     parent_email, "parent_email", "Parent email", parent_name or "Parent"
@@ -302,6 +309,12 @@ def student_screen():
                     st.error('Please enter your email!')
                 elif not parent_email:
                     st.error('Please enter parent email!')
+                elif not validate_parent_email(new_email, parent_email)[0]:
+                    st.error(validate_parent_email(new_email, parent_email)[1])
+                elif not is_valid_email(new_email) or not is_valid_email(parent_email):
+                    st.error('Please enter valid email addresses!')
+                elif emails_conflict(new_email, parent_email):
+                    st.error('❌ Parent email must be different from the student email!')
                 elif not student_verified:
                     st.error('❌ Please verify your student email first!')
                 elif not parent_verified:
