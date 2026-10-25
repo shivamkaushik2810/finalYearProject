@@ -8,12 +8,17 @@ from src.components.footer import footer_dashboard
 from src.components.timetable import admin_timetable_manager
 from src.components.student_analytics_ui import student_analytics_tab
 from src.components.term_manager import admin_term_manager
+from src.components.section_analytics import show_section_analytics
+from src.components.teacher_session_history import show_teacher_session_history
+from src.components.defaulter_emails import show_defaulter_email_panel
 from src.components.child_overview import _classes_needed, REQUIRED_PCT
 from src.database.config import supabase
 from src.database.attendance_status import eligible
 from src.database.db import admin_login, get_teachers_by_status, set_teacher_status
 from src.services.report_export import df_pdf
 from src.services.email_service import _send
+from src.components.defaulter_email import defaulter_email_panel
+
 
 
 def admin_screen():
@@ -40,7 +45,7 @@ def admin_login_screen():
             st.rerun()
 
     st.header('Admin Login', text_alignment='center')
-    username = st.text_input("Username")
+    username = st.text_input("Username",)
     password = st.text_input("Password", type="password")
 
     if st.button("Login", type="primary", icon=":material/passkey:", shortcut="control+enter"):
@@ -215,7 +220,7 @@ def _overview_tab():
         a = agg.setdefault(p['student_id'], [0, 0])
         a[0] += p['present']
         a[1] += p['total']
-    drows = []
+    drows, dmeta = [], []
     for sid, (pr, t) in agg.items():
         if t == 0:
             continue
@@ -223,6 +228,7 @@ def _overview_tab():
         if pct >= thr or sid not in info:
             continue
         x = info[sid]
+        dmeta.append({"student_id": sid, "name": x['name'], "roll_no": x.get('roll_no') or "", "pct": pct})
         drows.append({"Name": x['name'], "Roll No": x.get('roll_no') or "", "Course": x.get('course') or "",
                       "Year": x.get('year') or "", "Section": x.get('section') or "",
                       "Present/Total": f"{pr}/{t}", "Attendance %": pct,
@@ -236,6 +242,7 @@ def _overview_tab():
         if len(ddf) > 500:
             st.caption("Showing the 500 lowest. The CSV and PDF downloads contain all of them.")
         _download_pair(ddf, "Defaulters Report", f"Below {thr}% - {scope}", "defaulters", "adm_def")
+        defaulter_email_panel(dmeta, thr)
 
 
 # ───────────────────────── dashboard ─────────────────────────
@@ -255,7 +262,7 @@ def admin_dashboard():
             st.rerun()
 
     pending_n = len(get_teachers_by_status('pending'))
-    t1, t2, t3, t4, t5 = st.tabs([f"Teacher Approvals ({pending_n})", "Overview & Reports", "Timetable", "Student Analytics", "Academic Terms"])
+    t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([f"Teacher Approvals ({pending_n})", "Overview & Reports", "Timetable", "Student Analytics", "Academic Terms", "Section Analytics", "Teacher Sessions", "Defaulter Emails", "Feedback"])
     with t1:
         _approvals_tab()
     with t2:
@@ -266,5 +273,15 @@ def admin_dashboard():
         student_analytics_tab()
     with t5:
         admin_term_manager()
+    with t6:
+        show_section_analytics()
+    with t7:
+        show_teacher_session_history()
+    with t8:
+        show_defaulter_email_panel(teacher_id=None, key="admin_def")
+
+    with t9:
+        from src.components.feedback import show_admin_feedback_panel
+        show_admin_feedback_panel()
 
     footer_dashboard()
