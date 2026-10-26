@@ -1,9 +1,10 @@
 import streamlit as st
-from datetime import datetime
 from src.services.feedback_service import (
-    CATEGORIES, MAX_LEN, is_feedback_enabled, set_feedback_enabled,
-    submit_feedback, list_feedback_meta, read_and_delete_feedback
+    CATEGORIES, MAX_LEN, ALREADY_MSG, is_feedback_enabled, set_feedback_enabled,
+    submit_feedback, list_feedback_meta, read_and_delete_feedback,
+    has_sent_today, today_ist
 )
+from src.utils.time_utils import to_ist
 
 POLL_SECONDS = 5
 
@@ -14,17 +15,26 @@ def _feedback_form_fragment(role, user_id, user_name):
     # admin flips the switch, without a page refresh.
     if not is_feedback_enabled():
         return
+
+    day = today_ist()
+    sent_flag = f"fb_sent_{role}_{user_id}_{day}"
+    sent = bool(st.session_state.get(sent_flag)) or has_sent_today(role, str(user_id), day)
+
     with st.expander("💬 Send Feedback"):
         key = f"fb_{role}"
-        category = st.selectbox("Category", CATEGORIES, key=f"{key}_cat")
+        if sent:
+            st.info("✅ You have already sent feedback today. "
+                    "You can send again tomorrow.")
+        category = st.selectbox("Category", CATEGORIES, key=f"{key}_cat", disabled=sent)
         message = st.text_area(
-            "Your feedback", max_chars=MAX_LEN, key=f"{key}_msg",
+            "Your feedback", max_chars=MAX_LEN, key=f"{key}_msg", disabled=sent,
             placeholder="Tell the admin what's working or what could be better..."
         )
-        if st.button("Send Feedback", type="primary", key=f"{key}_btn"):
+        if st.button("Send Feedback", type="primary", key=f"{key}_btn", disabled=sent):
             ok, msg = submit_feedback(role, user_id, user_name, category, message)
-            if ok:
-                st.success(msg)
+            if ok or msg == ALREADY_MSG:
+                st.session_state[sent_flag] = True
+                st.rerun(scope="fragment")
             else:
                 st.error(msg)
 
@@ -36,8 +46,7 @@ def show_feedback_section(role, user_id, user_name):
 
 def _fmt(ts):
     try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")) \
-            .strftime("%d %b %Y, %I:%M %p")
+        return to_ist(ts).strftime("%d %b %Y, %I:%M %p")
     except Exception:
         return ts or "Unknown"
 

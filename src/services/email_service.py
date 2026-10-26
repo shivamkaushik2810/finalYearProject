@@ -17,14 +17,20 @@ def _send(to_email, subject, html, plain):
     config = _get_config()
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = f"SnapClass <{config['sender_email']}>"
+    from src.services.smtp_config import get_smtp_settings
+    msg["From"]    = f"SnapClass <{get_smtp_settings()['sender']}>"
     msg["To"]      = to_email
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html,  "html"))
-    with smtplib.SMTP("smtp.gmail.com", 587) as s:
-        s.ehlo(); s.starttls()
-        s.login(config["sender_email"], config["sender_password"])
-        s.sendmail(config["sender_email"], to_email, msg.as_string())
+    from src.services.smtp_config import open_smtp
+    server, cfg = open_smtp()
+    try:
+        server.sendmail(cfg["sender"], to_email, msg.as_string())
+    finally:
+        try:
+            server.quit()
+        except Exception:
+            pass
 
 
 def _fmt(ts):

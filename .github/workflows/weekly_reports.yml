@@ -56,10 +56,26 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
         run: |
           mkdir -p .streamlit
-          printf 'SUPABASE_URL = "%s"\nSUPABASE_KEY = "%s"\nEMAIL_ADDRESS = "%s"\nEMAIL_PASSWORD = "%s"\n' \
-            "$SUPABASE_URL" "$SUPABASE_KEY" "$EMAIL_ADDRESS" "$EMAIL_PASSWORD" > .streamlit/secrets.toml
+          {
+            printf 'SUPABASE_URL = "%s"\n' "$SUPABASE_URL"
+            printf 'SUPABASE_KEY = "%s"\n' "$SUPABASE_KEY"
+            printf 'EMAIL_ADDRESS = "%s"\n' "$EMAIL_ADDRESS"
+            printf 'EMAIL_PASSWORD = "%s"\n' "$EMAIL_PASSWORD"
+            if [ -n "$SMTP_HOST" ]; then
+              printf 'SMTP_HOST = "%s"\n' "$SMTP_HOST"
+              printf 'SMTP_PORT = "%s"\n' "${SMTP_PORT:-587}"
+              printf 'SMTP_USER = "%s"\n' "$SMTP_USER"
+              printf 'SMTP_PASSWORD = "%s"\n' "$SMTP_PASSWORD"
+              printf 'SMTP_FROM = "%s"\n' "$SMTP_FROM"
+            fi
+          } > .streamlit/secrets.toml
           chmod 600 .streamlit/secrets.toml
 
       - name: Send weekly reports

@@ -1,13 +1,19 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import streamlit as st
 from src.database.config import supabase
+from src.utils.time_utils import IST
 
 FLAG_KEY = "feedback_enabled"
 MIN_LEN = 5
 MAX_LEN = 1000
-MAX_PER_HOUR = 5
 ROLES = ("student", "teacher")
 CATEGORIES = ["Suggestion", "Bug / Problem", "Compliment", "Other"]
+ALREADY_MSG = "You have already sent feedback today. You can send again tomorrow."
+
+
+def today_ist():
+    """Today's date in IST as YYYY-MM-DD."""
+    return datetime.now(IST).date().isoformat()
 
 
 def _read_flag():
@@ -36,8 +42,28 @@ def set_feedback_enabled(enabled: bool):
     is_feedback_enabled.clear()
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def has_sent_today(role, sender_id, day):
+    """UI hint only (cached). The real limit is enforced in submit_feedback.
+    `day` is part of the cache key so it rolls over at midnight IST."""
+    try:
+        res = supabase.table("feedback_sent_log").select("sender_id") \
+            .eq("sender_role", role).eq("sender_id", str(sender_id)) \
+            .eq("sent_day", day).limit(1).execute()
+        return bool(res.data)
+    except Exception as e:
+        print(f"Feedback daily check failed: {type(e).__name__}")
+        return False
+
+
+def _is_duplicate(err):
+    text = str(err).lower()
+    return "23505" in text or "duplicate" in text
+
+
 def submit_feedback(role, sender_id, sender_name, category, message):
-    """Returns (ok, message). Re-checks the flag uncached on every submit."""
+    """Returns (ok, message). One submission per user per IST day, enforced
+    by the primary key of feedback_sent_log (safe against double clicks)."""
     try:
         if role not in ROLES:
             return False, "Invalid sender role."
@@ -53,20 +79,37 @@ def submit_feedback(role, sender_id, sender_name, category, message):
         if not _read_flag():
             return False, "Feedback is currently disabled."
 
-        since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        recent = supabase.table("feedback").select("id", count="exact") \
-            .eq("sender_role", role).eq("sender_id", str(sender_id)) \
-            .gte("created_at", since).execute()
-        if (recent.count or 0) >= MAX_PER_HOUR:
-            return False, "Too many submissions. Please try again later."
+        day = today_ist()
+        log_row = {"sender_role": role, "sender_id": str(sender_id), "sent_day": day}
 
-        supabase.table("feedback").insert({
-            "sender_role": role,
-            "sender_id":   str(sender_id),
-            "sender_name": sender_name,
-            "category":    category,
-            "message":     message,
-        }).execute()
+        # Claim today's slot first; a duplicate means already sent.
+        try:
+            supabase.table("feedback_sent_log").insert(log_row).execute()
+        except Exception as e:
+            if _is_duplicate(e):
+                has_sent_today.clear()
+                return False, ALREADY_MSG
+            raise
+
+        try:
+            supabase.table("feedback").insert({
+                "sender_role": role,
+                "sender_id":   str(sender_id),
+                "sender_name": sender_name,
+                "category":    category,
+                "message":     message,
+            }).execute()
+        except Exception:
+            # Release the slot so the user can retry a failed send.
+            try:
+                supabase.table("feedback_sent_log").delete() \
+                    .eq("sender_role", role).eq("sender_id", str(sender_id)) \
+                    .eq("sent_day", day).execute()
+            except Exception as cleanup_err:
+                print(f"Feedback slot release failed: {type(cleanup_err).__name__}")
+            raise
+
+        has_sent_today.clear()
         return True, "Thank you! Your feedback was sent."
     except Exception as e:
         print(f"Feedback submit failed: {type(e).__name__}")
