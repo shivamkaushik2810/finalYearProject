@@ -1,0 +1,58 @@
+name: SMTP check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test Gmail SMTP from the runner
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          python - << 'PY'
+          import os, smtplib, ssl, sys
+          from email.mime.text import MIMEText
+
+          user = os.environ["EMAIL_ADDRESS"]
+          pw = os.environ["EMAIL_PASSWORD"]
+          print("secret sanity: password length", len(pw),
+                "| has newline:", "\n" in pw,
+                "| has leading/trailing space:", pw != pw.strip())
+
+          def run(label, make):
+              print(f"\n== {label} ==")
+              server = None
+              try:
+                  server = make(); print("connect: ok")
+                  if label.startswith("587"):
+                      server.ehlo(); print("ehlo: ok")
+                      server.starttls(context=ssl.create_default_context()); print("starttls: ok")
+                      server.ehlo(); print("ehlo after tls: ok")
+                  server.login(user, pw); print("login: ok")
+                  server.noop(); print("noop: ok")
+                  m = MIMEText("SnapClass runner SMTP test")
+                  m["Subject"], m["From"], m["To"] = "SnapClass runner SMTP test", user, user
+                  server.sendmail(user, [user], m.as_string()); print("send to self: ok")
+                  return True
+              except Exception as e:
+                  print("FAIL:", type(e).__name__, e)
+                  return False
+              finally:
+                  try:
+                      if server: server.quit()
+                  except Exception:
+                      pass
+
+          a = run("587 STARTTLS", lambda: smtplib.SMTP("smtp.gmail.com", 587, timeout=30))
+          b = run("465 SSL", lambda: smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30,
+                                                      context=ssl.create_default_context()))
+          print("\nRESULT 587:", "OK" if a else "FAIL", "| 465:", "OK" if b else "FAIL")
+          sys.exit(0 if (a or b) else 1)
+          PY

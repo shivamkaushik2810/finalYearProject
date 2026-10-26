@@ -26,6 +26,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Validate manual inputs
+        env:
+          IN_TEST_EMAIL: ${{ inputs.test_email }}
+          IN_CURRENT_WEEK: ${{ inputs.current_week }}
+        run: |
+          if [ "$IN_CURRENT_WEEK" = "true" ] && [ -z "$IN_TEST_EMAIL" ]; then
+            echo "::error title=Invalid inputs::current_week is ticked but test_email is empty. A partial week must never go to real parents. Either enter your own email in test_email, or untick current_week to send the last full week."
+            exit 1
+          fi
+          if [ -n "$IN_TEST_EMAIL" ] && ! printf '%s' "$IN_TEST_EMAIL" | grep -Eq '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'; then
+            echo "::error title=Invalid test_email::test_email does not look like an email address."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
