@@ -78,6 +78,17 @@ jobs:
           } > .streamlit/secrets.toml
           chmod 600 .streamlit/secrets.toml
 
+      - name: Show which mail provider will be used
+        run: |
+          python - << 'PY'
+          import tomllib
+          s = tomllib.load(open(".streamlit/secrets.toml", "rb"))
+          host = s.get("SMTP_HOST")
+          print("provider:", "relay" if host else "gmail (SMTP_* secrets missing)")
+          print("host:", host or "smtp.gmail.com", "| port:", s.get("SMTP_PORT", "587"))
+          print("SMTP_USER set:", bool(s.get("SMTP_USER")), "| SMTP_PASSWORD set:", bool(s.get("SMTP_PASSWORD")), "| SMTP_FROM set:", bool(s.get("SMTP_FROM")))
+          PY
+
       - name: Send weekly reports
         env:
           IN_TEST_EMAIL: ${{ inputs.test_email }}
