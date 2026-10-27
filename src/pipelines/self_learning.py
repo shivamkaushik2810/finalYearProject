@@ -9,6 +9,9 @@ from sklearn.model_selection import cross_val_score, StratifiedKFold
 from src.database.config import supabase
 from src.database.db import get_all_students, count_students, _fetch_all
 from src.database.students_query import get_students_with_faces
+import threading
+import time
+from src.pipelines.model_store import save_model, training_lock
 
 
 MODEL_PATH = "model.pkl"
@@ -67,7 +70,7 @@ def get_all_training_data():
     return X, y, w, count_students()
 
 
-def train_self_learning_model(training_type="auto"):
+def _train_self_learning_model_unlocked(training_type="auto"):
     """
     Train the face classifier. Returns (success, accuracy_pct, message).
     Accuracy is only measured when every student has >= 2 samples;
@@ -124,7 +127,7 @@ def train_self_learning_model(training_type="auto"):
             'accuracy_measured': accuracy is not None,
             'training_type':  training_type
         }
-        joblib.dump(model_data, MODEL_PATH)
+        save_model(model_data)
 
         acc_pct = round(accuracy * 100, 2) if accuracy is not None else 0.0
         note = (f"Trained on {len(X)} samples from {total_students} students"
@@ -224,3 +227,49 @@ def auto_retrain_if_needed():
         success, accuracy, msg = train_self_learning_model("auto")
         return success, msg
     return False, reason
+
+
+# ── Concurrency guards ────────────────────────────────────────
+_auto_guard = threading.Lock()
+_BG_COOLDOWN_SECONDS = 600
+_bg_last_start = 0.0
+_bg_running = False
+
+
+def train_self_learning_model(training_type="auto"):
+    """Locked wrapper: one training run at a time (threads + processes).
+    Auto runs skip if busy; registration waits so the new student is included."""
+    wait = {"auto": 0, "registration": 120}.get(training_type, 30)
+    with training_lock(timeout=wait) as acquired:
+        if not acquired:
+            msg = "Another training run is already in progress"
+            log_message(msg)
+            return False, 0, msg
+        if training_type == "auto":
+            # Re-check inside the lock: another session may have just retrained.
+            still_needed, reason = should_auto_retrain()
+            if not still_needed:
+                return False, 0, f"Skipped: {reason}"
+        return _train_self_learning_model_unlocked(training_type)
+
+
+def start_background_retrain_check():
+    """Non-blocking; at most once per process per 10 minutes."""
+    global _bg_last_start, _bg_running
+    with _auto_guard:
+        if _bg_running or time.time() - _bg_last_start < _BG_COOLDOWN_SECONDS:
+            return False
+        _bg_running = True
+        _bg_last_start = time.time()
+
+    def _run():
+        global _bg_running
+        try:
+            auto_retrain_if_needed()
+        except Exception as e:
+            log_message(f"Background retrain check failed: {e}")
+        finally:
+            _bg_running = False
+
+    threading.Thread(target=_run, daemon=True, name="auto-retrain").start()
+    return True
