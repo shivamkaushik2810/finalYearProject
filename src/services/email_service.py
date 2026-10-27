@@ -1,4 +1,5 @@
 import smtplib
+import threading
 import html as _html
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -13,6 +14,31 @@ def _get_config():
     }
 
 
+_local = threading.local()
+
+
+def smtp_open():
+    """Open ONE authenticated connection (via smtp_config) reused by _send in this thread."""
+    from src.services.smtp_config import open_smtp
+    server, cfg = open_smtp()
+    _local.conn, _local.cfg = server, cfg
+    return server
+
+
+def smtp_close():
+    conn = getattr(_local, "conn", None)
+    _local.conn = None
+    _local.cfg = None
+    if conn is not None:
+        try:
+            conn.quit()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def _send(to_email, subject, html, plain):
     config = _get_config()
     msg = MIMEMultipart("alternative")
@@ -22,6 +48,10 @@ def _send(to_email, subject, html, plain):
     msg["To"]      = to_email
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html,  "html"))
+    conn = getattr(_local, "conn", None)
+    if conn is not None:  # batch mode: reuse the open connection
+        conn.sendmail(_local.cfg["sender"], to_email, msg.as_string())
+        return
     from src.services.smtp_config import open_smtp
     server, cfg = open_smtp()
     try:

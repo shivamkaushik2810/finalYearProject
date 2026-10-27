@@ -330,8 +330,8 @@ def _review_panel(session, subject_id, teacher_id, between=None):
             try:
                 with st.spinner("Saving attendance..."):
                     logs = _confirm_session(session, subject_id, teacher_id, present_ids, methods_by_student)
-                from src.components.dialog_attendance_results import _send_emails
-                _send_emails(logs)
+                from src.components.dialog_attendance_results import _queue_emails
+                _queue_emails(logs, logs)  # rows were just inserted by _confirm_session
                 st.toast("✅ Attendance saved!")
                 time.sleep(1)
                 st.rerun()

@@ -8,7 +8,7 @@ from src.screens.parent_screen import parent_screen
 from src.screens.admin_screen import admin_screen
 from src.components.dialog_auto_enroll import auto_enroll_dialog
 from src.services.scheduler import check_and_send_weekly_reports
-from src.pipelines.self_learning import auto_retrain_if_needed
+from src.pipelines.self_learning import start_background_retrain_check
 
 
 def main():
@@ -20,12 +20,8 @@ def main():
     # Monday weekly parent reports (background, once per process)
     check_and_send_weekly_reports()
 
-    # Auto retrain model once per session if needed
-    if 'model_checked' not in st.session_state:
-        retrained, msg = auto_retrain_if_needed()
-        if retrained:
-            print(f"Auto retrain: {msg}")
-        st.session_state['model_checked'] = True
+    # Auto retrain check: non-blocking, locked, at most once per process per 10 min
+    start_background_retrain_check()
 
     if 'login_type' not in st.session_state:
         st.session_state['login_type'] = None
@@ -49,6 +45,10 @@ def main():
             admin_screen()
         case None:
             home_screen()
+
+    if st.session_state.get('email_job_ids') or st.session_state.get('email_notices'):
+        from src.components.email_status import email_status_fragment
+        email_status_fragment()
 
     join_code = st.query_params.get('join-code')
     if join_code:

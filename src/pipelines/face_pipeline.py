@@ -1,4 +1,7 @@
 import json
+import os
+import threading
+import time
 import traceback
 from datetime import datetime
 
@@ -6,6 +9,9 @@ import face_recognition
 import numpy as np
 
 from src.database.students_query import get_students_with_faces
+
+SCAN_JITTERS = int(os.environ.get("SCAN_JITTERS", "1"))
+_SCAN_SLOTS = threading.BoundedSemaphore(int(os.environ.get("SCAN_CONCURRENCY", "2")))
 
 THRESHOLD = 0.55  # lower = stricter (0.6 is the library default)
 
@@ -27,7 +33,27 @@ def get_face_embeddings(image_np):
         return []
 
 
+_KNOWN_LOCK = threading.Lock()
+_KNOWN = {"at": 0.0, "val": None}
+KNOWN_TTL = float(os.environ.get("KNOWN_FACES_TTL", "60"))
+
+
+def invalidate_known_faces():
+    with _KNOWN_LOCK:
+        _KNOWN["val"] = None
+
+
 def _load_known_faces():
+    """Cached so concurrent scans share one DB read (read-only use)."""
+    with _KNOWN_LOCK:
+        if _KNOWN["val"] is not None and time.monotonic() - _KNOWN["at"] < KNOWN_TTL:
+            return _KNOWN["val"]
+        val = _load_known_faces_uncached()
+        _KNOWN["val"], _KNOWN["at"] = val, time.monotonic()
+        return val
+
+
+def _load_known_faces_uncached():
     ids, embs = [], []
     for s in get_students_with_faces():
         e = s.get('face_embedding')
@@ -43,6 +69,12 @@ def _load_known_faces():
 
 
 def _predict_core(image_np, enc_out=None):
+    """Bound how many scans do CPU-heavy work at once."""
+    with _SCAN_SLOTS:
+        return _predict_core_unbounded(image_np, enc_out)
+
+
+def _predict_core_unbounded(image_np, enc_out=None):
     """Match every face in the image against faces stored in the database.
     Fills enc_out[student_id] = encoding (if a dict is given)."""
     detected, all_ids, num_faces = {}, [], 0
@@ -54,7 +86,7 @@ def _predict_core(image_np, enc_out=None):
             return detected, all_ids, num_faces
 
         encodings = face_recognition.face_encodings(
-            image_np, locations, num_jitters=3
+            image_np, locations, num_jitters=SCAN_JITTERS
         )
         ids, known = _load_known_faces()
         _dbg(f"known faces loaded={len(ids)}")
@@ -92,6 +124,7 @@ def predict_attendance_with_encodings(image_np):
 def train_classifier():
     """Single trainer: delegates to the self-learning pipeline."""
     try:
+        invalidate_known_faces()  # new student must be matchable immediately
         from src.pipelines.self_learning import train_self_learning_model
         ok, _, _ = train_self_learning_model("registration")
         return ok

@@ -578,3 +578,29 @@ def get_subject_logs_full(subject_id):
     return _fetch_all(
         lambda: supabase.table('attendance_logs').select('*').eq('subject_id', subject_id),
         order=('timestamp', 'student_id'))
+
+
+def weekly_report_already_sent(student_id, week_start):
+    """True if a successfully sent report exists for this student and week."""
+    response = supabase.table('weekly_reports')\
+        .select('student_id')\
+        .eq('student_id', student_id)\
+        .eq('week_start', str(week_start))\
+        .eq('email_sent', True)\
+        .limit(1)\
+        .execute()
+    return bool(response.data)
+
+
+def create_attendance_idempotent(logs):
+    """Insert attendance rows, skipping rows that already exist
+    (unique on student_id, subject_id, timestamp).
+    Returns ONLY the rows that were newly inserted."""
+    if not logs:
+        return []
+    response = supabase.table('attendance_logs').upsert(
+        logs,
+        on_conflict='student_id,subject_id,timestamp',
+        ignore_duplicates=True
+    ).execute()
+    return response.data or []
