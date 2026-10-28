@@ -92,7 +92,7 @@ jobs:
       - name: Check Supabase URL (no secrets printed)
         run: |
           python - << 'PY'
-          import re, socket, tomllib
+          import re, socket, time, tomllib
           s = tomllib.load(open(".streamlit/secrets.toml", "rb"))
           u = s.get("SUPABASE_URL", "")
           print("SUPABASE_URL empty:", not u)
@@ -102,11 +102,18 @@ jobs:
           print("matches https://<20-char-ref>.supabase.co:", ok)
           host = u.replace("https://", "").split("/")[0]
           print("ref (first4...last4):", (host[:4] + "..." + host.split(".")[0][-4:]) if host else "(none)")
-          try:
-              socket.getaddrinfo(host, 443)
-              print("DNS resolves: True")
-          except Exception as e:
-              print("DNS resolves: False -", e)
+          last = None
+          for attempt in range(1, 7):
+              try:
+                  socket.getaddrinfo(host, 443)
+                  print(f"DNS resolves: True (attempt {attempt})")
+                  break
+              except Exception as e:
+                  last = e
+                  print(f"DNS attempt {attempt}/6 failed: {e}")
+                  time.sleep(10)
+          else:
+              print("DNS resolves: False after 6 attempts -", last)
               raise SystemExit(1)
           PY
 
