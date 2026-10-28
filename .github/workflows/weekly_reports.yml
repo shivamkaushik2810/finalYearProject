@@ -114,6 +114,22 @@ jobs:
                   time.sleep(10)
           else:
               print("DNS resolves: False after 6 attempts -", last)
+              for ctl in ("github.com", "supabase.com", "api.supabase.com"):
+                  try:
+                      socket.getaddrinfo(ctl, 443)
+                      print(f"control {ctl}: resolves")
+                  except Exception as e:
+                      print(f"control {ctl}: FAILS - {e}")
+              try:
+                  socket.getaddrinfo(host, 443, socket.AF_INET)
+                  print("project host over IPv4 only: resolves")
+              except Exception as e:
+                  print(f"project host over IPv4 only: FAILS - {e}")
+              try:
+                  ns = [l.split()[1] for l in open('/etc/resolv.conf') if l.startswith('nameserver')]
+                  print('runner nameservers:', ns)
+              except Exception as e:
+                  print('could not read resolv.conf:', e)
               raise SystemExit(1)
           PY
 
