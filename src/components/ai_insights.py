@@ -159,7 +159,7 @@ def show_attendance_prediction(attendance_logs, enrolled_students):
         with col1:
             st.write(f"{emoji} **{pred['name']}**")
         with col2:
-            st.write(f"{pred['attendance_pct']}%")
+            st.write("N/A" if pred['attendance_pct'] is None else f"{pred['attendance_pct']}%")
         with col3:
             st.write(pred['message'])
 

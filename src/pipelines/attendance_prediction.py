@@ -30,7 +30,7 @@ def predict_absent_risk(attendance_logs, enrolled_students):
         present = s['present']
 
         if total == 0:
-            pct        = 100
+            pct        = None  # no data is not 100%
             risk_level = "unknown"
             message    = "No attendance data yet"
         else:
@@ -58,7 +58,7 @@ def predict_absent_risk(attendance_logs, enrolled_students):
         })
 
     # Sort by attendance percentage ascending (worst first)
-    results.sort(key=lambda x: x['attendance_pct'])
+    results.sort(key=lambda x: (x['attendance_pct'] is None, x['attendance_pct'] or 0))
     return results
 
 

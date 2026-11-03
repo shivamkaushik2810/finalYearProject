@@ -11,6 +11,7 @@ from datetime import datetime
 
 from src.components.self_learning_ui import show_self_learning_dashboard
 from src.components.marks_management import show_teacher_marks
+from src.components.analytics_dashboard import show_attendance_analytics
 from src.components.ai_insights import (
     show_image_quality_check,
     show_liveness_check,
@@ -184,6 +185,8 @@ def teacher_tab_ai_insights(subjects, teacher_id):
         ])
 
         with ai_tab1:
+            show_attendance_analytics(logs, enrolled)
+            st.divider()
             show_attendance_prediction(logs, enrolled)
             st.divider()
             show_ml_absence_risk([s['subject_id'] for s in subjects], logs, enrolled)
@@ -341,6 +344,15 @@ def validate_password(password):
     common_words = ["password", "teacher", "admin", "snapclass", "123456", "qwerty", "letmein"]
     if any(word in password.lower() for word in common_words):
         return False, "Password is too common or contains a dictionary word."
+    lowered = password.lower()
+    if re.search(r'(.)\1{2,}', lowered):
+        return False, "Password must not repeat the same character 3 or more times in a row."
+    runs = ["abcdefghijklmnopqrstuvwxyz", "0123456789", "qwertyuiop", "asdfghjkl", "zxcvbnm"]
+    for run in runs:
+        for i in range(len(run) - 3):
+            chunk = run[i:i + 4]
+            if chunk in lowered or chunk[::-1] in lowered:
+                return False, "Password must not contain predictable sequences (abcd, 1234, qwer...)."
     return True, ""
 
 
