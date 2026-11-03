@@ -3,6 +3,7 @@ from datetime import datetime
 
 import numpy as np
 import streamlit as st
+from src.utils.time_utils import today_ist_start
 
 from src.database.config import supabase
 from src.components import qr_session as qs
@@ -105,7 +106,7 @@ def _start_card(subject, teacher_id):
                "At the end you review a single list and confirm once. A student can only be saved once per session.")
     allow = True
     try:
-        today = datetime.now().strftime("%Y-%m-%dT00:00:00")
+        today = today_ist_start()
         last = supabase.table('attendance_logs').select('timestamp')\
             .eq('subject_id', subject_id).gte('timestamp', today)\
             .order('timestamp', desc=True).limit(1).execute().data

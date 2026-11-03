@@ -6,9 +6,13 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 # Stub the Supabase client BEFORE any src.* import (config.py reads st.secrets).
-_fake_config = types.ModuleType("src.database.config")
-_fake_config.supabase = MagicMock()
-sys.modules["src.database.config"] = _fake_config
+# Reuse the shared in-memory fake that conftest.py installs before any import.
+# Only stub here if this file is ever run without conftest.
+_fake_config = sys.modules.get("src.database.config")
+if _fake_config is None:
+    _fake_config = types.ModuleType("src.database.config")
+    _fake_config.supabase = MagicMock()
+    sys.modules["src.database.config"] = _fake_config
 
 from src.pipelines.attendance_prediction import predict_absent_risk, get_subject_health
 from src.pipelines.nlp_analytics import parse_query, answer_query

@@ -14,6 +14,7 @@ import pandas as pd
 from PIL import Image
 import segno
 import streamlit as st
+from src.utils.time_utils import now_ist_wallclock
 
 from src.database.config import supabase
 from src.components.nfc_attendance import nfc_panel
@@ -115,7 +116,7 @@ def _start_session(subject_id, teacher_id, minutes):
         'session_code': _new_code(),
         'is_active':    True,
         'expires_at':   (now + timedelta(minutes=minutes)).isoformat(),
-        'session_ts':   datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        'session_ts':   now_ist_wallclock(),
     }
     res = supabase.table('attendance_sessions').insert(row).execute()
     return res.data[0]
@@ -168,7 +169,7 @@ def _confirm_session(session, subject_id, teacher_id, present_ids, methods_by_st
     if already:
         raise RuntimeError("Attendance for this session was already saved.")
 
-    ts = session.get('session_ts') or datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    ts = session.get('session_ts') or now_ist_wallclock()
     enrolled = supabase.table('subject_students').select('student_id')\
         .eq('subject_id', subject_id).execute().data or []
     order = [k for k, _ in METHODS]

@@ -1,4 +1,5 @@
 import streamlit as st
+from src.utils.time_utils import now_ist_wallclock
 import pandas as pd
 from datetime import datetime
 
@@ -39,7 +40,7 @@ def voice_attendance_dialog(selected_subject_id):
             detected_scores = process_bulk_audio(audio_bytes, candidates_dict)
 
             results, attendance_to_log = [], []
-            current_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            current_timestamp = now_ist_wallclock()
 
             for node in enrolled_students:
                 student = node['students']
