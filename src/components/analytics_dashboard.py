@@ -6,15 +6,18 @@ BAND_ORDER = ["Below 50%", "50-75%", "75% and above"]
 _COLS = ("student_id", "timestamp", "is_present")
 
 
+_OFFSET_RE = r"\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)$"
+
+
 def _parse_ts(series):
-    """Parse DB timestamps; survives a mix of naive and tz-aware strings."""
-    try:
-        ts = pd.to_datetime(series, errors="coerce")
-    except (ValueError, TypeError):
-        ts = pd.to_datetime(series, errors="coerce", utc=True)
-    if not pd.api.types.is_datetime64_any_dtype(ts):
-        ts = pd.to_datetime(series, errors="coerce", utc=True)
-    return ts
+    """Stored timestamps are IST wall-clock (column is timestamp WITHOUT time zone).
+    Strings that carry an explicit offset are converted to IST; bare ones are kept as they are."""
+    s = pd.Series(series).astype("string")
+    has_off = s.str.contains(_OFFSET_RE, regex=True, na=False)
+    aware = pd.to_datetime(s.where(has_off), errors="coerce", utc=True, format="ISO8601")
+    aware = aware.dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+    naive = pd.to_datetime(s.where(~has_off), errors="coerce", format="ISO8601")
+    return naive.fillna(aware)
 
 
 def _clean_logs(logs, enrolled=None):

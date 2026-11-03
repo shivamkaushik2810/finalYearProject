@@ -11,38 +11,18 @@ def parse_query(query: str):
 
     # Intent patterns
     intents = [
-        # Absent queries
-        (r'who.*(absent|miss|skip|not attend)', 'absent_students'),
-        (r'(absent|miss|skip).*(most|maximum|highest|often)', 'most_absent'),
-        (r'(absent|miss).*(today|this week|this month|yesterday)', 'absent_time'),
-
-        # Present queries
-        (r'who.*(present|attend|came)', 'present_students'),
-        (r'(present|attend).*(most|maximum|highest|often)', 'most_present'),
-        (r'(present|attend).*(today|this week|this month)', 'present_time'),
-
-        # Count queries
+        # ORDER MATTERS: specific patterns first, generic "who..." patterns last
+        (r'how many.*(absent|miss|skip|not attend)', 'count_absent'),
         (r'how many.*(present|attend|came)', 'count_present'),
-        (r'how many.*(absent|miss|skip)', 'count_absent'),
+        (r'(at risk|risk|danger|low attend|fail|warning|alert|concern)', 'at_risk'),
+        (r'(worst|lowest|poor|least).*attend', 'worst_attendance'),
+        (r'(best|top|highest).*attend', 'best_attendance'),
+        (r'(percent|percentage|rate).*attend|attend.*(percent|percentage|rate)', 'attendance_rate'),
+        (r'(absent|miss|skip)\w*.*(most|maximum|highest|often)|(most|maximum|highest|often).*(absent|miss|skip)', 'most_absent'),
+        (r'(present|attend|came)\w*.*(most|maximum|highest|often)|(most|maximum|highest|often).*(present|attend|came)', 'most_present'),
+        (r'who.*(absent|miss|skip|not attend)', 'absent_students'),
+        (r'who.*(present|attend|came)', 'present_students'),
         (r'total.*(student|attend)', 'total_students'),
-
-        # Percentage queries
-        (r'(percent|percentage|rate).*(attend)', 'attendance_rate'),
-        (r'(attend).*(percent|percentage|rate)', 'attendance_rate'),
-
-        # Risk queries
-        (r'(at risk|risk|danger|low attend|fail)', 'at_risk'),
-        (r'(warning|alert|concern)', 'at_risk'),
-
-        # Best/worst queries
-        (r'(best|top|highest).*(attend)', 'best_attendance'),
-        (r'(worst|lowest|poor).*(attend)', 'worst_attendance'),
-
-        # Specific student
-
-        # Subject queries
-        (r'(which subject|what subject).*(low|poor|bad)', 'worst_subject'),
-        (r'(which subject|what subject).*(high|best|good)', 'best_subject'),
     ]
 
     for pattern, intent in intents:
@@ -198,7 +178,7 @@ def _count_absent(stats, students):
 def _get_attendance_rate(stats):
     if not stats:
         return ("No data available.", {})
-    avg = round(sum(s['pct'] for s in stats.values()) / len(stats), 1)
+    avg = round(sum(s['present'] for s in stats.values()) / max(1, sum(s['total'] for s in stats.values())) * 100, 1)
     return (f"📊 Overall class attendance rate: **{avg}%**", {"rate": avg})
 
 
@@ -233,7 +213,7 @@ def _get_worst_students(stats):
 def _general_summary(stats, students, subject_name):
     total    = len(students)
     at_risk  = sum(1 for s in stats.values() if s['pct'] < 75 and s['total'] > 0)
-    avg_pct  = round(sum(s['pct'] for s in stats.values()) / len(stats), 1) if stats else 0
+    avg_pct  = round(sum(s['present'] for s in stats.values()) / max(1, sum(s['total'] for s in stats.values())) * 100, 1) if stats else 0
     summary  = (
         f"📊 **{subject_name} Attendance Summary**\n"
         f"  • Total Students: {total}\n"

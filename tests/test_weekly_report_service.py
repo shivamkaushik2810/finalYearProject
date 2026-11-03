@@ -7,9 +7,21 @@ for n in ("get_all_enrolled_students_with_parents","get_subjects_for_student",
           "get_weekly_attendance","save_weekly_report"):
     setattr(db, n, MagicMock())
 em  = types.ModuleType("src.services.email_service"); em._send = MagicMock()
-sys.modules.update({"src.database.config": cfg, "src.database.db": db,
-                    "src.services.email_service": em})
-from src.services import weekly_report_service as w
+# Stub modules ONLY while importing the service; nothing leaks into other test files.
+import src.services as _services
+_KEY = "src.services.weekly_report_service"
+_real = sys.modules.pop(_KEY, None)
+if hasattr(_services, "weekly_report_service"):
+    delattr(_services, "weekly_report_service")
+with patch.dict(sys.modules, {"src.database.config": cfg, "src.database.db": db,
+                              "src.services.email_service": em}):
+    from src.services import weekly_report_service as w
+sys.modules.pop(_KEY, None)
+if hasattr(_services, "weekly_report_service"):
+    delattr(_services, "weekly_report_service")
+if _real is not None:               # put the real module back for everyone else
+    sys.modules[_KEY] = _real
+    _services.weekly_report_service = _real
 
 
 def student(i=1, **kw):

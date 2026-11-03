@@ -53,3 +53,19 @@ def test_band_boundaries():
     assert _band(50) == "50-75%"
     assert _band(74.9) == "50-75%"
     assert _band(75) == "75% and above"
+
+
+def test_naive_values_are_ist_wall_clock_not_shifted():
+    s = _build_session_df([L("a", True, "2026-11-01T10:30:00")], ENR)
+    assert s["ts"].iloc[0].hour == 10 and s["ts"].iloc[0].minute == 30
+
+
+def test_offset_and_naive_ist_are_one_session():
+    logs = [L("a", True, "2026-11-01T10:30:00+05:30"), L("b", False, "2026-11-01T10:30:00")]
+    s = _build_session_df(logs, ENR)
+    assert len(s) == 1 and s["Attendance %"].iloc[0] == 50.0
+
+
+def test_utc_offset_is_converted_to_ist():
+    s = _build_session_df([L("a", True, "2026-11-01T05:00:00+00:00")], ENR)
+    assert s["ts"].iloc[0].hour == 10 and s["ts"].iloc[0].minute == 30
