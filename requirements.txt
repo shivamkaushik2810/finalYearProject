@@ -1,6 +1,7 @@
 streamlit
 # Utilities
 numpy
+opencv-python-headless==4.10.0.84
 pandas
 joblib
 
@@ -22,5 +23,4 @@ reportlab
 anthropic
 vl-convert-python
 ultralytics
-opencv-python==4.10.0.84
 matplotlib
