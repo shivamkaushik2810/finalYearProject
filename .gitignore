@@ -8,7 +8,8 @@ __pycache__/
 .coverage
 htmlcov/
 .DS_Store
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 
 # Keep project source tracked
 
