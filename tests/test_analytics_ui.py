@@ -23,6 +23,8 @@ def _clean():
 
 @pytest.fixture
 def admin_app(fake_db):
+    st.cache_data.clear()
+    st.cache_resource.clear()
     seed(fake_db)
     at = _at()
     at.session_state["admin_data"] = {"id": 1, "name": "Admin", "username": "admin"}
