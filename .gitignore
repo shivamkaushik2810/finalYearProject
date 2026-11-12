@@ -85,3 +85,4 @@ backup_before_test_fix_*/
 fix_tests.sh
 model.pkl*
 ai-attendance-project-app-backup-*/
+model.pkl.lock
