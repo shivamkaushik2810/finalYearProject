@@ -81,3 +81,4 @@ htmlcov/
 .pytest_cache/
 
 node_modules/
+*.lock
