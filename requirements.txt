@@ -25,3 +25,4 @@ vl-convert-python
 ultralytics
 matplotlib
 httpx
+httpx==0.28.1
