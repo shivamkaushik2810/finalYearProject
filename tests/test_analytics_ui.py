@@ -17,6 +17,8 @@ def _at():
 @pytest.fixture(autouse=True)
 def _clean():
     st.cache_data.clear()
+    from src.components import student_analytics_ui as ui
+    ui._directory.clear()
     yield
     st.cache_data.clear()
 

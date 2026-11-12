@@ -80,3 +80,5 @@ fix.sh
 script.py
 files_for_claude.txt
 project_structure.txt
+backup_before_test_fix_*/
+fix_tests.sh

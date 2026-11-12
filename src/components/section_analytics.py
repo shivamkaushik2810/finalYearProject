@@ -24,7 +24,7 @@ def _pct(num, den):
 
 
 def _clean(series, fallback="—"):
-    out = series.fillna("").astype(str).str.strip()
+    out = series.astype(object).where(series.notna(), "").astype(str).str.strip()
     return out.replace({"": fallback, "None": fallback, "nan": fallback})
 
 

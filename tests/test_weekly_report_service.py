@@ -1,15 +1,12 @@
 import sys, types, unittest
 from unittest.mock import MagicMock, patch
 
-cfg = types.ModuleType("src.database.config"); cfg.supabase = MagicMock()
-db  = types.ModuleType("src.database.db")
-for n in ("get_all_enrolled_students_with_parents","get_subjects_for_student",
-          "get_weekly_attendance","save_weekly_report"):
-    setattr(db, n, MagicMock())
-em  = types.ModuleType("src.services.email_service"); em._send = MagicMock()
-sys.modules.update({"src.database.config": cfg, "src.database.db": db,
-                    "src.services.email_service": em})
+from unittest.mock import MagicMock, patch
 from src.services import weekly_report_service as w
+
+for _name in ("get_all_enrolled_students_with_parents", "get_subjects_for_student",
+              "get_weekly_attendance", "save_weekly_report", "_send"):
+    patch.object(w, _name, MagicMock()).start()
 
 
 def student(i=1, **kw):
