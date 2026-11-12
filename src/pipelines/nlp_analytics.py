@@ -11,6 +11,12 @@ def parse_query(query: str):
 
     # Intent patterns
     intents = [
+        # Specific questions must be checked before broad present/absent patterns.
+        (r'who.*(absent|miss|skip).*(most|maximum|highest|often)', 'most_absent'),
+        (r'who.*(attend|present|came).*(most|maximum|highest|often)', 'most_present'),
+        (r'how many.*(present|attend|came)', 'count_present'),
+        (r'(best|top|highest).*attend', 'best_attendance'),
+        (r'(worst|lowest|poor).*attend', 'worst_attendance'),
         # Absent queries
         (r'who.*(absent|miss|skip|not attend)', 'absent_students'),
         (r'(absent|miss|skip).*(most|maximum|highest|often)', 'most_absent'),

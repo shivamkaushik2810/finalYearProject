@@ -15,3 +15,18 @@ def to_ist(ts):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo("UTC"))
     return dt.astimezone(IST)
+
+
+def now_ist_wallclock():
+    """IST wall-clock timestamp for timestamp-without-time-zone columns."""
+    return datetime.now(IST).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def today_ist_start():
+    """Today's midnight in IST, formatted for database queries."""
+    return datetime.now(IST).strftime("%Y-%m-%dT00:00:00")
+
+
+def today_ist_start():
+    """Today's midnight in IST for database queries."""
+    return datetime.now(IST).strftime("%Y-%m-%dT00:00:00")
