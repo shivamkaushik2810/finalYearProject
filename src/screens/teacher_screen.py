@@ -42,6 +42,24 @@ from src.database.config import supabase
 from src.database.attendance_status import eligible
 from src.components.attendance_corrections import teacher_attendance_corrections
 
+import logging
+from src.services import attendance_stats as S
+from src.components.charts import attendance_trend, subject_bars
+from src.ui.widgets import empty_state, stat_cards
+
+_log = logging.getLogger(__name__)
+
+TEACHER_NAV = {
+    "overview": ":material/dashboard: Overview",
+    "take_attendance": ":material/photo_camera: Attendance",
+    "manage_subjects": ":material/menu_book: Subjects",
+    "enrolled_students": ":material/group: Students",
+    "attendance_records": ":material/cards_stack: Records",
+    "marks": ":material/grade: Marks",
+    "ai_insights": ":material/smart_toy: Insights",
+    "analytics": ":material/monitoring: Analytics",
+}
+
 
 def teacher_screen():
     style_background_dashboard()
@@ -65,7 +83,7 @@ def teacher_dashboard():
     with c2:
         teacher_name = teacher_data['name']
         st.subheader(f'Welcome, {teacher_name}')
-        if st.button("Logout", type="secondary", key="loginbackbtn", shortcut="control+backspace"):
+        if st.button("Log out", type="secondary", key="danger_logout", shortcut="control+backspace"):
             st.session_state["is_logged_in"] = False
             del st.session_state.teacher_data
             st.rerun()
@@ -75,40 +93,22 @@ def teacher_dashboard():
     with st.spinner("Loading your subjects.."):
         subjects = get_teacher_subjects(teacher_id)
 
-    if "current_teacher_tab" not in st.session_state:
-        st.session_state.current_teacher_tab = "take_attendance"
-
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "Take Attendance",
-        "Manage Subjects",
-        "Enrolled Students",
-        "Attendance Records",
-        "Marks",
-        "AI Insights",
-        "Analytics"
-    ])
-
-    tabs = [
-        (tab1, "take_attendance",   "Take Attendance",   ":material/photo_camera:"),
-        (tab2, "manage_subjects",   "Manage Subjects",   ":material/menu_book:"),
-        (tab3, "enrolled_students", "Enrolled Students", ":material/group:"),
-        (tab4, "attendance_records","Attendance Records",":material/cards_stack:"),
-        (tab5, "marks",             "Marks",             ":material/grade:"),
-        (tab6, "ai_insights",       "AI Insights",       ":material/smart_toy:"),
-        (tab7, "analytics", "Analytics", ":material/monitoring:"),
-        
-    ]
-    for tab, key, label, icon in tabs:
-        with tab:
-            btn_type = "primary" if st.session_state.current_teacher_tab == key else "tertiary"
-            if st.button(label, type=btn_type, width="stretch", icon=icon, key=f"tabbtn_{key}"):
-                st.session_state.current_teacher_tab = key
-                st.rerun()
+    # one navigation row. The state key is the same one other code already uses.
+    if st.session_state.get("current_teacher_tab") not in TEACHER_NAV:
+        st.session_state.current_teacher_tab = st.session_state.get("_last_teacher_tab") or "overview"
+    picked = st.segmented_control(
+        "Section", list(TEACHER_NAV), format_func=TEACHER_NAV.get,
+        key="current_teacher_tab", label_visibility="collapsed",
+    )
+    if picked:
+        st.session_state["_last_teacher_tab"] = picked
 
     st.divider()
 
-    current = st.session_state.current_teacher_tab
-    if current == "take_attendance":
+    current = picked or st.session_state.get("_last_teacher_tab") or "overview"
+    if current == "overview":
+        teacher_tab_overview(subjects)
+    elif current == "take_attendance":
         teacher_tab_take_attendance()
     elif current == "manage_subjects":
         teacher_tab_manage_subjects()
@@ -127,6 +127,117 @@ def teacher_dashboard():
     show_feedback_section("teacher", teacher_id, teacher_name)
 
     footer_dashboard()
+
+
+def _goto_tab(tab):
+    st.session_state.current_teacher_tab = tab
+
+
+def _load_subject_logs(subjects):
+    """{subject_id: eligible logs}. Same helpers as AI Insights, so the numbers match."""
+    out, failed = {}, []
+    for s in subjects:
+        sid = s["subject_id"]
+        try:
+            out[sid] = eligible(get_subject_logs_full(sid)) or []
+        except Exception:
+            _log.exception("Could not load attendance logs for subject_id=%s", sid)
+            failed.append(s["name"])
+    return out, failed
+
+
+def _subject_pct_map(subjects):
+    logs_by_sid, _ = _load_subject_logs(subjects)
+    result = {}
+    for sid, rows in logs_by_sid.items():
+        t = S.overall(rows)
+        result[sid] = (t["pct"], t["total"])
+    return result
+
+
+def teacher_tab_overview(subjects):
+    st.header("Overview")
+    if not subjects:
+        empty_state("Create your first subject", "Subjects hold your students, attendance and marks.")
+        st.button("Create subject", type="primary", on_click=_goto_tab, args=("manage_subjects",))
+        return
+
+    st.button("Take attendance now", type="primary", icon=":material/photo_camera:",
+              on_click=_goto_tab, args=("take_attendance",))
+
+    with st.spinner("Loading attendance..."):
+        logs_by_sid, failed = _load_subject_logs(subjects)
+    if failed:
+        st.warning("Couldn't load attendance for: " + ", ".join(failed) + ". The numbers below leave them out.")
+
+    all_logs = [dict(row, subject_id=sid) for sid, rows in logs_by_sid.items() for row in rows]
+    total = S.overall(all_logs)
+    at_risk = len(S.at_risk_students(all_logs))
+    last = pd.to_datetime(S.last_session(all_logs), errors="coerce")
+    last_txt = "None yet" if pd.isna(last) else f"{last:%d %b, %I:%M %p}"
+    tone = ("" if not total["total"] else "good" if total["pct"] >= 75
+            else "avg" if total["pct"] >= 50 else "bad")
+    stat_cards([
+        ("Subjects", len(subjects), ""),
+        ("Average attendance", f"{total['pct']:.0f}%" if total["total"] else "No data", tone),
+        ("At-risk students", at_risk, "bad" if at_risk else "good"),
+        ("Last session", last_txt, ""),
+    ])
+
+    cols = st.columns(2)
+    chart_rows = []
+    for i, sub in enumerate(subjects):
+        loaded = sub["subject_id"] in logs_by_sid  # a subject that failed to load shows no numbers
+        t = S.overall(logs_by_sid.get(sub["subject_id"], []))
+        if loaded:
+            chart_rows.append((sub["name"], t["pct"]))
+        with cols[i % 2]:
+            subject_card(
+                name=sub["name"], code=sub["subject_code"], section=sub["section"],
+                course=sub.get("course"), year=sub.get("year"),
+                stats=[("\U0001FAC2", "Students", sub["total_students"]),
+                       ("\U0001F570\uFE0F", "Classes", sub["total_classes"])],
+                pct=t["pct"] if loaded else None, total=t["total"] if loaded else None,
+            )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        subject_bars(chart_rows)
+    with c2:
+        attendance_trend(all_logs)
+
+
+def _password_checks(pw, username="", name=""):
+    """Checklist that mirrors validate_password below, so the hints never disagree with the rules."""
+    pw = pw or ""
+    low = pw.lower()
+    personal = [p for p in [(username or "").lower()] + [w.lower() for w in (name or "").split() if len(w) >= 3] if p]
+    _, msg = validate_password(pw)
+    predictable = msg.startswith(("Password is too common", "Password must not repeat",
+                                  "Password must not contain predictable"))
+    return [
+        (8 <= len(pw) <= 64, "8 to 64 characters"),
+        (bool(re.search(r"[A-Z]", pw)), "An uppercase letter"),
+        (bool(re.search(r"[a-z]", pw)), "A lowercase letter"),
+        (bool(re.search(r"[0-9]", pw)), "A number"),
+        (bool(re.search(r'[!@#$%^&*(),.?":{}|<>_\-]', pw)), "A special character"),
+        (bool(pw) and not predictable, "No common words, repeats or sequences like 1234"),
+        (bool(pw) and not any(p in low for p in personal), "Doesn't contain your username or name"),
+    ]
+
+
+def _render_password_checklist(pw, username="", name=""):
+    if not pw:
+        return
+    checks = _password_checks(pw, username, name)
+    score = sum(1 for ok, _ in checks if ok)
+    label = "Strong" if score == len(checks) else "Fair" if score >= 5 else "Weak"
+    color = {"Strong": "#3B6D11", "Fair": "#BA7517", "Weak": "#A32D2D"}[label]
+    segs = "".join(f'<i style="background:{color if n < score else "#cbd5e1"}"></i>' for n in range(len(checks)))
+    tick, cross = "\u2713", "\u2717"
+    lines = "<br>".join(f"{tick if ok else cross} {text}" for ok, text in checks)
+    st.markdown(f'<div class="sc-pw" role="img" aria-label="Password strength: {label}">{segs}</div>'
+                f'<div style="font-size:.85rem"><b>{label}</b><br>{lines}</div>', unsafe_allow_html=True)
 
 
 def teacher_tab_ai_insights(subjects, teacher_id):
@@ -236,6 +347,7 @@ def teacher_tab_manage_subjects():
             create_subject_dialog(teacher_id)
 
     subjects = get_teacher_subjects(teacher_id)
+    pct_map = _subject_pct_map(subjects) if subjects else {}
     if subjects:
         for sub in subjects:
             stats = [
@@ -254,7 +366,9 @@ def teacher_tab_manage_subjects():
                 code=sub['subject_code'],
                 section=sub['section'], course=sub.get('course'), year=sub.get('year'),
                 stats=stats,
-                footer_callback=share_btn
+                footer_callback=share_btn,
+                pct=pct_map.get(sub['subject_id'], (None, None))[0],
+                total=pct_map.get(sub['subject_id'], (None, None))[1]
             )
     else:
         st.info("NO SUBJECTS FOUND. CREATE ONE ABOVE")
@@ -384,6 +498,7 @@ def teacher_screen_register():
     teacher_name = st.text_input("Enter name", placeholder='Ananya Roy')
     teacher_email = st.text_input("Enter your email", placeholder='teacher@gmail.com', help="Attendance summary will be sent to this email after every class")
     teacher_pass = st.text_input("Enter password", type='password', placeholder="Enter password")
+    _render_password_checklist(teacher_pass, teacher_username, teacher_name)
     teacher_pass_confirm = st.text_input("Confirm your password", type='password', placeholder="Enter password")
 
     st.divider()
