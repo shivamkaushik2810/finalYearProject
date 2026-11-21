@@ -1,0 +1,73 @@
+name: Low attendance warnings
+
+on:
+  schedule:
+    - cron: "30 4 * * 2,5"      # Tue and Fri 04:30 UTC = 10:00 IST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: count who would be warned, send nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  warn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-job.txt
+      - run: pip install -r requirements-job.txt requests
+      - name: Write secrets file
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          ALERT_CHANNEL: ${{ secrets.ALERT_CHANNEL }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+          TWILIO_WHATSAPP_FROM: ${{ secrets.TWILIO_WHATSAPP_FROM }}
+        run: |
+          mkdir -p .streamlit
+          {
+            printf 'SUPABASE_URL = "%s"\n' "$SUPABASE_URL"
+            printf 'SUPABASE_KEY = "%s"\n' "$SUPABASE_KEY"
+            [ -n "$SUPABASE_SERVICE_KEY" ] && printf 'SUPABASE_SERVICE_KEY = "%s"\n' "$SUPABASE_SERVICE_KEY"
+            printf 'EMAIL_ADDRESS = "%s"\n' "$EMAIL_ADDRESS"
+            printf 'EMAIL_PASSWORD = "%s"\n' "$EMAIL_PASSWORD"
+            if [ -n "$SMTP_HOST" ]; then
+              printf 'SMTP_HOST = "%s"\n' "$SMTP_HOST"
+              printf 'SMTP_PORT = "%s"\n' "${SMTP_PORT:-587}"
+              printf 'SMTP_USER = "%s"\n' "$SMTP_USER"
+              printf 'SMTP_PASSWORD = "%s"\n' "$SMTP_PASSWORD"
+              printf 'SMTP_FROM = "%s"\n' "$SMTP_FROM"
+            fi
+            if [ -n "$ALERT_CHANNEL" ]; then
+              printf 'ALERT_CHANNEL = "%s"\n' "$ALERT_CHANNEL"
+              printf 'TWILIO_ACCOUNT_SID = "%s"\n' "$TWILIO_ACCOUNT_SID"
+              printf 'TWILIO_AUTH_TOKEN = "%s"\n' "$TWILIO_AUTH_TOKEN"
+              printf 'TWILIO_FROM = "%s"\n' "$TWILIO_FROM"
+              printf 'TWILIO_WHATSAPP_FROM = "%s"\n' "$TWILIO_WHATSAPP_FROM"
+            fi
+          } > .streamlit/secrets.toml
+          chmod 600 .streamlit/secrets.toml
+      - name: Send warnings
+        env:
+          IN_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$IN_DRY_RUN" = "true" ]; then python -m src.features.alerts.run --dry-run; else python -m src.features.alerts.run; fi
