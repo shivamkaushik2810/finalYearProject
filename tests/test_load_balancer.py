@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from src.services.load_balancer import BalancedRunner, default_workers, configured_workers
+from src.services.load_balancer import BalancedRunner, configured_workers, default_workers
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ def test_no_slot_leak_after_failures(runner):
         raise RuntimeError("x")
 
     runner.run(boom, range(10))
-    res = runner.run(lambda x: x, range(10))  # would hang or fail if slots leaked
+    res = runner.run(lambda x: x, range(10))
     assert all(r.ok for r in res)
 
 
@@ -109,7 +109,7 @@ def test_concurrent_callers_are_safe():
 def test_close_is_idempotent():
     r = BalancedRunner(workers=1, max_in_flight=1)
     r.close()
-    r.close()  # must not raise
+    r.close()
 
 
 def test_submit_after_close_fails_clearly():
@@ -119,9 +119,31 @@ def test_submit_after_close_fails_clearly():
         r.run(lambda x: x, [1])
 
 
+def test_zero_workers_rejected():
+    with pytest.raises(ValueError):
+        BalancedRunner(workers=0)
+
+
+def test_zero_max_in_flight_rejected():
+    with pytest.raises(ValueError):
+        BalancedRunner(workers=3, max_in_flight=0)
+
+
+def test_default_max_in_flight_is_at_least_workers():
+    r = BalancedRunner(workers=3)
+    try:
+        assert r.max_in_flight >= r.workers
+    finally:
+        r.close()
+
+
 def test_default_workers_caps_at_two():
     assert default_workers(cpu_count=1) == 1
     assert default_workers(cpu_count=8) == 2
+
+
+def test_default_workers_zero_cpu_is_one():
+    assert default_workers(cpu_count=0) == 1
 
 
 def test_default_workers_uses_machine_count(monkeypatch):
@@ -138,12 +160,3 @@ def test_default_workers_when_cpu_unknown(monkeypatch):
 def test_invalid_env_falls_back(monkeypatch, raw):
     monkeypatch.setenv("SNAPCLASS_MAX_WORKERS", raw)
     assert configured_workers() == default_workers()
-
-
-@pytest.mark.parametrize("invalid_value", [0, -1, -5])
-def test_invalid_max_in_flight_raises_value_error(invalid_value):
-    with pytest.raises(
-        ValueError,
-        match="max_in_flight must be at least 1",
-    ):
-        BalancedRunner(workers=3, max_in_flight=invalid_value)

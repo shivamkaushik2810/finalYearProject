@@ -86,3 +86,4 @@ node_modules/
 *.pathbak
 _my_full_replacements/
 files_for_claude*.txt
+*.before_*

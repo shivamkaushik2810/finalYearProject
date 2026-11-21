@@ -5,6 +5,7 @@ import streamlit as st
 import face_recognition
 from PIL import Image
 from src.pipelines.spoof_guard import detect_spoof
+from src.pipelines.face_runtime import FACE_RECOGNITION_LOCK
 
 TURN_DELTA = 0.35        # head must turn this much vs the first photo
 EAR_CLOSED = 0.20        # eye aspect ratio below this = eyes closed
@@ -47,11 +48,12 @@ def _ear(eye):
 
 
 def _analyze(img_np):
-    locs = face_recognition.face_locations(img_np, model='hog')
-    if len(locs) != 1:
-        return None
-    lm = face_recognition.face_landmarks(img_np, locs)
-    enc = face_recognition.face_encodings(img_np, locs, num_jitters=1)
+    with FACE_RECOGNITION_LOCK:
+        locs = face_recognition.face_locations(img_np, model='hog')
+        if len(locs) != 1:
+            return None
+        lm = face_recognition.face_landmarks(img_np, locs)
+        enc = face_recognition.face_encodings(img_np, locs, num_jitters=1)
     if not lm or not enc:
         return None
     lm = lm[0]

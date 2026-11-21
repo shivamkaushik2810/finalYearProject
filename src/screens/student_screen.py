@@ -23,6 +23,9 @@ from src.components.marks_management import show_student_marks
 from src.components.child_overview import render_child_overview, render_announcements
 from src.components.qr_session import student_qr_panel
 from src.components.timetable import render_timetable
+from src.components.leave_ui import student_leave_tab
+from src.components.dialog_add_angles import add_angles_dialog
+from src.services.face_embeddings import all_embeddings
 
 
 def student_dashboard():
@@ -42,11 +45,16 @@ def student_dashboard():
     st.space()
     show_parent_email_update(student_data)
 
+    if len(all_embeddings(student_data)) < 3:
+        st.warning("📸 Add at least 3 face angles (front, left, right) so you are recognised reliably.")
+        if st.button('Add face angles now', type='primary', key='add_angles_banner'):
+            add_angles_dialog(student_id)
+
     if st.query_params.get('qr-code'):
         student_qr_panel(student_data, key_prefix='qr_top')
         st.divider()
 
-    tab_over, tab1, tab2, tab3 = st.tabs(['🏠 Overview', '📚 My Subjects', '📋 My Attendance', '📝 My Marks'])
+    tab_over, tab1, tab2, tab3, tab_leave = st.tabs(['🏠 Overview', '📚 My Subjects', '📋 My Attendance', '📝 My Marks', '📝 Leave'])
 
     with tab_over:
         student_qr_panel(student_data, key_prefix='qr_ov')
@@ -114,6 +122,13 @@ def student_dashboard():
 
     with tab3:
         show_student_marks(student_id)
+
+    with tab_leave:
+        try:
+            student_leave_tab(student_id)
+        except Exception as e:
+            print(f"Leave tab error: {type(e).__name__}")
+            st.info("Leave requests are not available yet (database setup missing).")
 
     from src.components.feedback import show_feedback_section
     show_feedback_section("student", student_id, student_data["name"])

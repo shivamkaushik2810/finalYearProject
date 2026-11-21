@@ -116,9 +116,13 @@ def send_weekly_reports_to_all_parents(force=False):
                     if not test:
                         pending.extend(rows)   # saved only after the email really went out
                     success += 1
-                    if len(pending) >= 500:
-                        save_weekly_reports_bulk(pending)
-                        pending = []
+                    if pending:   # record this parent now: a crash must not cause a repeat email next run
+                        try:
+                            save_weekly_reports_bulk(pending)
+                            pending = []
+                        except Exception as save_err:
+                            print(f"  ⚠️ could not record the report for {stu.get('name', 'Unknown')} yet "
+                                  f"({type(save_err).__name__}); will retry with the next parent")
                 except Exception as e:
                     failed += 1
                     print(f"  ❌ Failed for {stu.get('name', 'Unknown')}: {e}")

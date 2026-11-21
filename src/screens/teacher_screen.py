@@ -58,6 +58,7 @@ TEACHER_NAV = {
     "marks": ":material/grade: Marks",
     "ai_insights": ":material/smart_toy: Insights",
     "analytics": ":material/monitoring: Analytics",
+    "more_tools": ":material/build: Tools",
 }
 
 
@@ -122,6 +123,13 @@ def teacher_dashboard():
         teacher_tab_ai_insights(subjects, teacher_id)
     elif current == "analytics":
         teacher_analytics_tab(subjects, teacher_id)
+    elif current == "more_tools":
+        try:
+            from src.components.teacher_tools import teacher_more_tools
+            teacher_more_tools(subjects, teacher_id)
+        except Exception:
+            _log.exception("Tools tab failed")
+            st.error("Tools could not load. Check the database setup (sql/migrations) and the terminal log.")
 
     from src.components.feedback import show_feedback_section
     show_feedback_section("teacher", teacher_id, teacher_name)

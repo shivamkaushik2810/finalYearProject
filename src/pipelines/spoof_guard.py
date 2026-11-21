@@ -3,6 +3,7 @@ import streamlit as st
 import face_recognition
 
 from src.pipelines.liveness_detection import detect_screen_or_photo as _legacy_check
+from src.pipelines.face_runtime import FACE_RECOGNITION_LOCK
 
 try:
     from ultralytics import YOLO
@@ -43,7 +44,8 @@ def _detect(image_np, log):
             return False, "Phone detector is not installed/working. Ask the admin to fix it."
         return _legacy_check(image_np)
 
-    locs = face_recognition.face_locations(image_np, model='hog')
+    with FACE_RECOGNITION_LOCK:
+        locs = face_recognition.face_locations(image_np, model='hog')
     log.append(f"faces found: {len(locs)}")
     if not locs:
         return True, "no face (handled by face pipeline)"

@@ -604,3 +604,17 @@ def create_attendance_idempotent(logs):
         ignore_duplicates=True
     ).execute()
     return response.data or []
+
+
+def find_subject_for_student(subject_code, student):
+    """Return the subject with this code that belongs to the student's class.
+    If none matches, return the first row so the caller can explain why it is not allowed."""
+    from src.components.filters import can_enroll  # local import avoids a circular import
+    rows = (supabase.table('subjects').select('*, teachers(name)')
+            .ilike('subject_code', subject_code).execute().data or [])
+    if not rows:
+        return None
+    for row in rows:
+        if can_enroll(row, student)[0]:
+            return row
+    return rows[0]
