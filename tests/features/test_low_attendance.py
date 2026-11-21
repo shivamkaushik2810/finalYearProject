@@ -128,5 +128,16 @@ class RunJob(unittest.TestCase):
             self.assertEqual(la.run(today=WEEK)["flagged"], 0)
 
 
+class TestMode(unittest.TestCase):
+    def test_everything_goes_to_the_test_address_and_nothing_is_recorded(self):
+        p = person("1", phone="9876543210", parent_phone="+919812345678", alert_opt_in=True)
+        with Env([row("1", "m", 10, 4)], [p], mode="whatsapp") as e:
+            r = la.run(test_email="me@example.com", today=WEEK)
+            again = la.run(test_email="me@example.com", today=WEEK)
+        self.assertEqual([t[0] for t in e.sent], ["me@example.com"] * 4)
+        self.assertTrue(all(t[1].startswith("[TEST] ") for t in e.sent))
+        self.assertEqual((r["emails_sent"], again["emails_sent"], len(e.claimed), e.msgs), (2, 2, 0, []))
+
+
 if __name__ == "__main__":
     unittest.main()

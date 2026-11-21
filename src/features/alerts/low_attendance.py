@@ -103,7 +103,8 @@ def build_email(student_name, parent_name, items, names, threshold, for_parent):
 
 # ───────────── the job ─────────────
 
-def run(dry_run=False, max_emails=DEFAULT_MAX_EMAILS, threshold=THRESHOLD, min_classes=MIN_CLASSES, today=None):
+def run(dry_run=False, max_emails=DEFAULT_MAX_EMAILS, threshold=THRESHOLD, min_classes=MIN_CLASSES, today=None,
+        test_email=None):
     period = iso_week_key(today)
     low = group_low(_view_rows(), threshold, min_classes)
     res = {"period": period, "flagged": len(low), "emails_sent": 0, "messages_sent": 0,
@@ -115,6 +116,14 @@ def run(dry_run=False, max_emails=DEFAULT_MAX_EMAILS, threshold=THRESHOLD, min_c
     mode = alerts.channel_mode()
 
     def deliver(sid, channel, send, is_email):
+        if test_email:                      # test mode: send to your own address only, record nothing
+            try:
+                send()
+                res["emails_sent"] += 1
+            except Exception as e:
+                res["failed"] += 1
+                log.warning("test send failed: %s", type(e).__name__)
+            return
         if dry_run:
             res["emails_sent" if is_email else "messages_sent"] += 1
             return
@@ -144,12 +153,15 @@ def run(dry_run=False, max_emails=DEFAULT_MAX_EMAILS, threshold=THRESHOLD, min_c
             if _usable_email(p.get("parent_email")) and not emails_conflict(p.get("email"), p.get("parent_email")):
                 targets.append(("email_parent", p["parent_email"], True))
             for channel, addr, for_parent in targets:
+                addr = test_email or addr
                 if res["emails_sent"] >= max_emails:
                     res["deferred"] += 1
                     continue
                 subj, body, plain = build_email(p.get("name"), p.get("parent_name"), items, names, threshold, for_parent)
+                if test_email:
+                    subj = "[TEST] " + subj
                 deliver(sid, channel, lambda a=addr, s=subj, b=body, t=plain: mail._send(a, s, b, t), True)
-            if mode != "off" and p.get("alert_opt_in"):
+            if mode != "off" and p.get("alert_opt_in") and not test_email:
                 short = "; ".join(f"{names.get(i['subject_id'], 'Subject')} {i['pct']}%" for i in items[:3])
                 for channel, raw, who in (("msg_student", p.get("phone"), "Your"),
                                           ("msg_parent", p.get("parent_phone"), f"{p.get('name') or 'Your ward'}'s")):

@@ -2,6 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from src.components.leave_ui import teacher_leave_tab
+from src.features.accuracy.ui import show_accuracy_page
 from src.services import audit_service as audit
 from src.services import eligibility_service as elig
 from src.services import schedule_service as sched
@@ -162,7 +163,7 @@ def _schedule(subjects, teacher_id):
 
 def teacher_more_tools(subjects, teacher_id):
     st.header("🧰 More Tools")
-    t1, t2, t3, t4 = st.tabs(["Leave Requests", "Corrections & Audit", "Eligibility", "Schedule & Location"])
+    t1, t2, t3, t4, t5 = st.tabs(["Leave Requests", "Corrections & Audit", "Eligibility", "Schedule & Location", "Accuracy"])
     with t1:
         teacher_leave_tab(teacher_id)
     with t2:
@@ -171,3 +172,5 @@ def teacher_more_tools(subjects, teacher_id):
         _eligibility(subjects, teacher_id)
     with t4:
         _schedule(subjects, teacher_id)
+    with t5:
+        show_accuracy_page()

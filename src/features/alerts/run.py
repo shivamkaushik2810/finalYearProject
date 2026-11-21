@@ -14,6 +14,7 @@ def main(argv=None):
     ap.add_argument("--max-emails", type=int, default=None)
     ap.add_argument("--threshold", type=float, default=None)
     ap.add_argument("--min-classes", type=int, default=None)
+    ap.add_argument("--test-email", default=None, help="send every email to this address only; nothing is recorded")
     a = ap.parse_args(argv)
     from src.features.alerts import low_attendance as la
     try:
@@ -25,7 +26,8 @@ def main(argv=None):
         res = la.run(dry_run=a.dry_run,
                      max_emails=a.max_emails or la.DEFAULT_MAX_EMAILS,
                      threshold=a.threshold or la.THRESHOLD,
-                     min_classes=a.min_classes or la.MIN_CLASSES)
+                     min_classes=a.min_classes or la.MIN_CLASSES,
+                     test_email=a.test_email)
     print(res)
     return 1 if res["failed"] and not (res["emails_sent"] or res["messages_sent"]) else 0
 
