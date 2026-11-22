@@ -1,9 +1,12 @@
 import html
+
 import pandas as pd
 import streamlit as st
 
 from src.ui.base_layout import style_background_dashboard, style_base_layout
-from src.components.header import header_dashboard
+from src.ui.admin_theme import (
+    ADMIN_PAGES, inject_admin_theme, page_header, sidebar_brand, login_brand,
+)
 from src.components.footer import footer_dashboard
 from src.components.timetable import admin_timetable_manager
 from src.components.student_analytics_ui import student_analytics_tab
@@ -12,18 +15,20 @@ from src.components.section_analytics import show_section_analytics
 from src.components.teacher_session_history import show_teacher_session_history
 from src.components.defaulter_emails import show_defaulter_email_panel
 from src.components.child_overview import _classes_needed, REQUIRED_PCT
+from src.components.admin_accounts import admin_accounts_panel
+from src.components.admin_audit import admin_audit_panel
+from src.components.admin_system import admin_system_panel
+from src.components.defaulter_email import defaulter_email_panel
 from src.database.config import supabase
-from src.database.attendance_status import eligible
 from src.database.db import admin_login, get_teachers_by_status, set_teacher_status
 from src.services.report_export import df_pdf
 from src.services.email_service import _send
-from src.components.defaulter_email import defaulter_email_panel
-
 
 
 def admin_screen():
     style_background_dashboard()
     style_base_layout()
+    inject_admin_theme()
     if "admin_data" in st.session_state:
         admin_dashboard()
     else:
@@ -36,28 +41,32 @@ def _go_home():
 
 
 def admin_login_screen():
-    c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
-    with c1:
-        header_dashboard()
-    with c2:
-        if st.button("Go back to Home", type='secondary', key='loginbackbtn'):
-            _go_home()
-            st.rerun()
-
-    st.header('Admin Login', text_alignment='center')
-    username = st.text_input("Username",)
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login", type="primary", icon=":material/passkey:", shortcut="control+enter"):
-        admin, msg = admin_login(username, password)
-        if admin:
-            st.session_state.admin_data = {'id': admin['id'], 'name': admin.get('name') or admin['username'],
-                                           'username': admin['username']}
-            st.session_state.user_role = 'admin'
-            st.session_state.is_logged_in = True
-            st.rerun()
-        else:
-            st.error(msg)
+    _, mid, _ = st.columns([1, 1.1, 1])
+    with mid:
+        st.space()
+        st.space()
+        with st.container(border=True):
+            login_brand()
+            st.markdown("<div class='ad-login-title'>Sign in</div>"
+                        "<div class='ad-login-sub'>Administrator access only.</div>",
+                        unsafe_allow_html=True)
+            username = st.text_input("Username", key="adm_user")
+            password = st.text_input("Password", type="password", key="adm_pass")
+            if st.button("Sign in", type="primary", icon=":material/passkey:",
+                         shortcut="control+enter", width="stretch", key="adm_login"):
+                admin, msg = admin_login(username, password)
+                if admin:
+                    st.session_state.admin_data = {'id': admin['id'],
+                                                   'name': admin.get('name') or admin['username'],
+                                                   'username': admin['username']}
+                    st.session_state.user_role = 'admin'
+                    st.session_state.is_logged_in = True
+                    st.rerun()
+                else:
+                    st.error(msg)
+            if st.button("Back to home", type="tertiary", width="stretch", key="adm_back"):
+                _go_home()
+                st.rerun()
     footer_dashboard()
 
 
@@ -85,9 +94,9 @@ def _cached_rows(table, select, order=()):
 
 def _download_pair(df, title, subtitle, base, key):
     c1, c2 = st.columns(2)
-    c1.download_button("⬇️ CSV", df.to_csv(index=False).encode("utf-8"),
+    c1.download_button("Download CSV", df.to_csv(index=False).encode("utf-8"),
                        file_name=f"{base}.csv", mime="text/csv", key=f"{key}_csv")
-    c2.download_button("⬇️ PDF", df_pdf(df, title, subtitle),
+    c2.download_button("Download PDF", df_pdf(df, title, subtitle),
                        file_name=f"{base}.pdf", mime="application/pdf", key=f"{key}_pdf")
 
 
@@ -97,7 +106,7 @@ def _notify_teacher(t, approved):
         return
     msg = ("Your teacher account has been approved. You can now log in to SnapClass." if approved
            else "Your teacher account request was not approved. Please contact the administrator.")
-    subject = "✅ SnapClass account approved" if approved else "SnapClass account request update"
+    subject = "SnapClass account approved" if approved else "SnapClass account request update"
     plain = f"Dear {t['name']},\n\n{msg}\n\nSnapClass Team"
     body = (f"<p>Dear <b>{html.escape(t['name'])}</b>,</p><p>{html.escape(msg)}</p>"
             f"<p>SnapClass Team</p>")
@@ -135,12 +144,12 @@ def _approvals_tab():
         for t in approved:
             _teacher_row(t, [("Revoke", "rejected", "tertiary")])
     rejected = get_teachers_by_status('rejected')
-    with st.expander(f"Rejected / revoked ({len(rejected)})"):
+    with st.expander(f"Rejected or revoked ({len(rejected)})"):
         for t in rejected:
             _teacher_row(t, [("Approve", "approved", "primary")])
 
 
-# ───────────────────────── overview & reports ─────────────────────────
+# ───────────────────────── overview ─────────────────────────
 
 def _overview_tab():
     try:
@@ -154,7 +163,7 @@ def _overview_tab():
         return
 
     top = st.columns([5, 1])
-    top[0].caption("Data is cached for 5 minutes for speed. Press Refresh after new attendance is saved.")
+    top[0].caption("Data is cached for 5 minutes. Press Refresh after new attendance is saved.")
     if top[1].button("Refresh", key="adm_refresh"):
         st.cache_data.clear()
         st.rerun()
@@ -162,13 +171,14 @@ def _overview_tab():
     def _opts(rows, field):
         return sorted({str(r[field]).strip() for r in rows if r.get(field) not in (None, '')})
 
-    f1, f2, f3 = st.columns(3)
-    course = f1.selectbox("Course", ["All courses"] + _opts(subjects, 'course'), key="adm_course")
-    year = f2.selectbox("Year", ["All years"] + _opts(subjects, 'year'), key="adm_year")
-    pool = [x for x in subjects
-            if (course == "All courses" or str(x.get('course')) == course)
-            and (year == "All years" or str(x.get('year')) == year)]
-    choice = f3.selectbox("Section", ["All sections"] + _opts(pool, 'section'), key="adm_section")
+    with st.container(border=True):
+        f1, f2, f3 = st.columns(3)
+        course = f1.selectbox("Course", ["All courses"] + _opts(subjects, 'course'), key="adm_course")
+        year = f2.selectbox("Year", ["All years"] + _opts(subjects, 'year'), key="adm_year")
+        pool = [x for x in subjects
+                if (course == "All courses" or str(x.get('course')) == course)
+                and (year == "All years" or str(x.get('year')) == year)]
+        choice = f3.selectbox("Section", ["All sections"] + _opts(pool, 'section'), key="adm_section")
     sel = [x for x in pool if choice == "All sections" or x.get('section') == choice]
     scope = f"{course} | {year if year == 'All years' else 'Year ' + year} | {choice}"
 
@@ -184,9 +194,8 @@ def _overview_tab():
     c2.metric("Teachers", len(get_teachers_by_status('approved')))
     c3.metric("Subjects", len(sel))
     c4.metric("Sessions", sessions)
-    c5.metric("Avg attendance", f"{avg}%")
+    c5.metric("Average attendance", f"{avg}%")
 
-    # per-subject table
     st.subheader("Subject-wise attendance")
     by_sub = {}
     for p in pairs_f:
@@ -211,7 +220,6 @@ def _overview_tab():
     else:
         st.info("No subjects for this selection.")
 
-    # defaulters
     st.subheader("Defaulters (all subjects)")
     thr = st.slider("Attendance threshold (%)", 40, 95, REQUIRED_PCT, 5, key="adm_thr")
     info = {x['student_id']: x for x in students}
@@ -245,43 +253,64 @@ def _overview_tab():
         defaulter_email_panel(dmeta, thr)
 
 
-# ───────────────────────── dashboard ─────────────────────────
+# ───────────────────────── shell ─────────────────────────
+
+def _feedback_panel():
+    from src.components.feedback import show_admin_feedback_panel
+    show_admin_feedback_panel()
+
 
 def admin_dashboard():
     admin = st.session_state.admin_data
+    admin_name = admin.get('name') or 'Administrator'
+    pending_n = len(get_teachers_by_status('pending'))
 
-    c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
-    with c1:
-        header_dashboard()
-    with c2:
-        st.subheader(f"Welcome, {admin['name']}")
-        if st.button("Logout", type="secondary", key="loginbackbtn"):
-            del st.session_state.admin_data
+    keys = [k for k, *_ in ADMIN_PAGES]
+    info = {k: (label, title, sub) for k, label, title, sub in ADMIN_PAGES}
+
+    with st.sidebar:
+        sidebar_brand(admin_name)
+        st.radio(
+            "Menu", keys, key="admin_nav", label_visibility="collapsed",
+            format_func=lambda k: (f"{info[k][0]} ({pending_n})"
+                                   if k == "approvals" and pending_n else info[k][0]),
+        )
+        st.divider()
+        if st.button("Log out", key="danger_admin_logout", width="stretch"):
+            st.session_state.pop('admin_data', None)
             st.session_state['is_logged_in'] = False
             _go_home()
             st.rerun()
 
-    pending_n = len(get_teachers_by_status('pending'))
-    t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([f"Teacher Approvals ({pending_n})", "Overview & Reports", "Timetable", "Student Analytics", "Academic Terms", "Section Analytics", "Teacher Sessions", "Defaulter Emails", "Feedback"])
-    with t1:
-        _approvals_tab()
-    with t2:
-        _overview_tab()
-    with t3:
-        admin_timetable_manager()
-    with t4:
-        student_analytics_tab()
-    with t5:
-        admin_term_manager()
-    with t6:
-        show_section_analytics()
-    with t7:
-        show_teacher_session_history()
-    with t8:
-        show_defaulter_email_panel(teacher_id=None, key="admin_def")
+    choice = st.session_state.get("admin_nav") or "overview"
+    if choice not in info:
+        choice = "overview"
+    _, title, subtitle = info[choice]
+    page_header(title, subtitle, admin_name)
 
-    with t9:
-        from src.components.feedback import show_admin_feedback_panel
-        show_admin_feedback_panel()
+    if choice == "overview":
+        _overview_tab()
+    elif choice == "approvals":
+        _approvals_tab()
+    elif choice == "accounts":
+        admin_accounts_panel()
+    elif choice == "timetable":
+        admin_timetable_manager()
+    elif choice == "terms":
+        admin_term_manager()
+    elif choice == "students":
+        student_analytics_tab()
+    elif choice == "sections":
+        show_section_analytics()
+    elif choice == "sessions":
+        show_teacher_session_history()
+    elif choice == "defaulters":
+        show_defaulter_email_panel(teacher_id=None, key="admin_def")
+    elif choice == "feedback":
+        _feedback_panel()
+    elif choice == "audit":
+        admin_audit_panel()
+    elif choice == "system":
+        admin_system_panel()
 
     footer_dashboard()

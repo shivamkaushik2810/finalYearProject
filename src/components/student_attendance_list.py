@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime
 from src.database.attendance_status import eligible
+from src.services.thresholds import status_icon
 
 
 def show_student_attendance_list(student_id):
@@ -60,7 +61,7 @@ def show_student_attendance_list(student_id):
     with col3:
         st.metric("❌ Absent", total_absent)
     with col4:
-        color = "🟢" if overall_pct >= 75 else "🟡" if overall_pct >= 50 else "🔴"
+        color = status_icon(overall_pct)
         st.metric("Overall", f"{color} {overall_pct}%")
 
     st.divider()
@@ -68,7 +69,7 @@ def show_student_attendance_list(student_id):
     # Subject wise breakdown
     for sid, stats in subject_stats.items():
         pct   = round((stats['present'] / stats['total']) * 100) if stats['total'] > 0 else 0
-        color = "🟢" if pct >= 75 else "🟡" if pct >= 50 else "🔴"
+        color = status_icon(pct)
 
         with st.expander(
             f"{color} {stats['name']} ({stats['code']}) — {pct}% attendance",

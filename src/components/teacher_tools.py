@@ -7,6 +7,7 @@ from src.services import audit_service as audit
 from src.services import eligibility_service as elig
 from src.services import schedule_service as sched
 from src.services.pure_logic import csv_safe
+from src.ui.widgets import confirm_dialog
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -115,6 +116,18 @@ def _eligibility(subjects, teacher_id):
                 st.rerun()
 
 
+def _confirm_remove_slot(slot_id, teacher_id):
+    def _do(slot_id=slot_id, teacher_id=teacher_id):
+        ok, msg = sched.delete_slot(teacher_id, slot_id)
+        if ok:
+            st.toast(msg)
+        else:
+            st.error(msg)
+
+    confirm_dialog("Remove this weekly class slot? Attendance already recorded is not affected.",
+                   "Remove", _do, key=f"slot_{slot_id}")
+
+
 def _schedule(subjects, teacher_id):
     sid = _pick(subjects, "sch_sub")
     if not sid:
@@ -125,9 +138,7 @@ def _schedule(subjects, teacher_id):
         c1.write(f"**{WEEKDAYS[s['weekday']]}** {str(s['start_time'])[:5]} - {str(s['end_time'])[:5]} "
                  f"(grace {s['grace_minutes']} min)")
         if c2.button("Remove", key=f"slot_del_{s['id']}"):
-            ok, msg = sched.delete_slot(teacher_id, s['id'])
-            (st.success if ok else st.error)(msg)
-            st.rerun()
+            _confirm_remove_slot(s['id'], teacher_id)
     a, b, c, d = st.columns(4)
     day = a.selectbox("Day", range(7), format_func=lambda i: WEEKDAYS[i], key=f"slot_day_{sid}")
     start = b.time_input("Start", key=f"slot_start_{sid}")

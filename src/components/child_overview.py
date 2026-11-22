@@ -6,9 +6,10 @@ from src.database.config import supabase
 from src.database.attendance_status import eligible
 from src.database.db import get_marks_by_student
 from src.pipelines.grading import grade_for
+from src.services.thresholds import status_icon, ATTENDANCE_TARGET
 from src.services.report_export import df_pdf
 
-REQUIRED_PCT = 75
+REQUIRED_PCT = ATTENDANCE_TARGET
 
 
 def _fmt_ts(ts):
@@ -19,7 +20,7 @@ def _fmt_ts(ts):
 
 
 def _icon(pct):
-    return "🟢" if pct >= 75 else "🟡" if pct >= 50 else "🔴"
+    return status_icon(pct)
 
 
 def _load_logs(student_id):

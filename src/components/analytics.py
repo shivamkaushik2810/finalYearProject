@@ -26,6 +26,18 @@ def _logs(subject_id):
     return eligible(res.data)
 
 
+def _confirm_delete_announcement(ann_id, teacher_id):
+    from src.ui.widgets import confirm_dialog
+
+    def _do(ann_id=ann_id, teacher_id=teacher_id):
+        supabase.table('announcements').delete()\
+            .eq('id', ann_id).eq('teacher_id', teacher_id).execute()
+        st.toast("Announcement deleted.")
+
+    confirm_dialog("Delete this announcement? Students and parents will no longer see it.",
+                   "Delete", _do, key=f"ann_{ann_id}")
+
+
 def _csv_button(df, label, filename, key):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
                        file_name=filename, mime="text/csv", key=key)
@@ -224,9 +236,7 @@ def _announcements_tab(subjects, teacher_id):
                 st.caption(str(a.get('created_at', ''))[:16].replace('T', ' '))
             with c2:
                 if st.button("Delete", key=f"ann_del_{a['id']}"):
-                    supabase.table('announcements').delete()\
-                        .eq('id', a['id']).eq('teacher_id', teacher_id).execute()
-                    st.rerun()
+                    _confirm_delete_announcement(a['id'], teacher_id)
 
 
 # ───────────────────────── entry point ─────────────────────────
