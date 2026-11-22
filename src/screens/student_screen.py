@@ -26,6 +26,7 @@ from src.components.timetable import render_timetable
 from src.components.leave_ui import student_leave_tab
 from src.components.dialog_add_angles import add_angles_dialog
 from src.services.face_embeddings import all_embeddings
+from src.ui.portal_theme import inject_portal_theme
 
 
 def student_dashboard():
@@ -383,6 +384,7 @@ def _registration_wizard(photo_source):
 def student_screen():
     style_background_dashboard()
     style_base_layout()
+    inject_portal_theme()
 
     if "student_data" in st.session_state:
         student_dashboard()
