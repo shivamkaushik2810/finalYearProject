@@ -46,6 +46,7 @@ import logging
 from src.services import attendance_stats as S
 from src.components.charts import attendance_trend, subject_bars
 from src.ui.widgets import empty_state, stat_cards
+from src.ui.teacher_theme import inject_teacher_theme, teacher_brand_html
 
 _log = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ TEACHER_NAV = {
 def teacher_screen():
     style_background_dashboard()
     style_base_layout()
+    inject_teacher_theme()
 
     if "teacher_data" in st.session_state:
         teacher_dashboard()
@@ -94,17 +96,17 @@ def teacher_dashboard():
     with st.spinner("Loading your subjects.."):
         subjects = get_teacher_subjects(teacher_id)
 
-    # one navigation row. The state key is the same one other code already uses.
+    # sidebar navigation. The state key is the same one other code already uses.
     if st.session_state.get("current_teacher_tab") not in TEACHER_NAV:
         st.session_state.current_teacher_tab = st.session_state.get("_last_teacher_tab") or "overview"
-    picked = st.segmented_control(
-        "Section", list(TEACHER_NAV), format_func=TEACHER_NAV.get,
-        key="current_teacher_tab", label_visibility="collapsed",
-    )
+    with st.sidebar:
+        st.markdown(teacher_brand_html(), unsafe_allow_html=True)
+        picked = st.radio(
+            "Menu", list(TEACHER_NAV), format_func=TEACHER_NAV.get,
+            key="current_teacher_tab", label_visibility="collapsed",
+        )
     if picked:
         st.session_state["_last_teacher_tab"] = picked
-
-    st.divider()
 
     current = picked or st.session_state.get("_last_teacher_tab") or "overview"
     if current == "overview":
