@@ -18,6 +18,7 @@ from src.components.child_overview import _classes_needed, REQUIRED_PCT
 from src.components.admin_accounts import admin_accounts_panel
 from src.components.admin_audit import admin_audit_panel
 from src.components.admin_system import admin_system_panel
+from src.components.admin_exports import admin_exports_panel
 from src.components.defaulter_email import defaulter_email_panel
 from src.database.config import supabase
 from src.database.db import admin_login, get_teachers_by_status, set_teacher_status
@@ -310,6 +311,8 @@ def admin_dashboard():
         _feedback_panel()
     elif choice == "audit":
         admin_audit_panel()
+    elif choice == "exports":
+        admin_exports_panel()
     elif choice == "system":
         admin_system_panel()
 

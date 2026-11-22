@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from src.services.thresholds import ATTENDANCE_TARGET, ATTENDANCE_WARN
 from src.database.analytics_queries import load_core_frames, student_attendance_summary
 from src.services.defaulter_email_service import send_defaulter_report
 
@@ -63,7 +64,7 @@ def show_defaulter_email_panel(teacher_id=None, key="def"):
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        threshold = st.slider("Defaulter if below (%)", 30, 90, 75, key=f"{key}_th")
+        threshold = st.slider("Defaulter if below (%)", 30, 90, ATTENDANCE_TARGET, key=f"{key}_th")
     with c2:
         secs = ["All"] + sorted(students["section"].dropna().unique().tolist())
         sec = st.selectbox("Section", secs, key=f"{key}_sec")

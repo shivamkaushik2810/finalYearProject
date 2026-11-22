@@ -1,3 +1,4 @@
+from src.services.thresholds import ATTENDANCE_TARGET, ATTENDANCE_WARN
 import numpy as np
 import pandas as pd
 import altair as alt
@@ -5,7 +6,7 @@ import streamlit as st
 
 alt.data_transformers.disable_max_rows()
 
-DEFAULT_THR = 75
+DEFAULT_THR = ATTENDANCE_TARGET
 MODES = ["Course · Year · Section", "Section only"]
 METRICS = {"Average attendance %": "AvgPct", "Students": "Students", "Defaulters": "Defaulters",
            "Defaulter rate %": "DefRate", "Subjects": "Subjects"}

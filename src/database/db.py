@@ -4,7 +4,7 @@ from src.services.email_rules import emails_conflict
 import streamlit as st
 from src.database.config import supabase
 
-STUDENT_LIGHT_COLS = "student_id, name, email, roll_no, section, year, course, parent_email, parent_name"
+STUDENT_LIGHT_COLS = "student_id, name, email, roll_no, section, year, course, parent_email, parent_name, report_frequency"
 PAGE = 1000  # Supabase returns max 1000 rows per request
 
 

@@ -9,6 +9,7 @@ from src.database.db import (
     save_weekly_report
 )
 from src.services.email_service import _send
+from src.services.thresholds import ATTENDANCE_TARGET, ATTENDANCE_WARN
 from src.services import email_templates as T
 
 
@@ -36,11 +37,11 @@ def send_weekly_parent_email(
     total = sum(r['total'] for r in subject_reports)
     present = sum(r['attended'] for r in subject_reports)
     overall = round(present / total * 100, 1) if total > 0 else 0
-    tone = "good" if overall >= 75 else "bad" if overall < 50 else "avg"
-    overall_label = "Good" if overall >= 75 else "Needs Improvement" if overall < 50 else "Average"
+    tone = "good" if overall >= ATTENDANCE_TARGET else "bad" if overall < ATTENDANCE_WARN else "avg"
+    overall_label = "Good" if overall >= ATTENDANCE_TARGET else "Needs Improvement" if overall < ATTENDANCE_WARN else "Average"
 
     def status(p):
-        return ("Good", "#27500A") if p >= 75 else ("At Risk", "#791F1F") if p < 50 else ("Average", "#633806")
+        return ("Good", "#27500A") if p >= ATTENDANCE_TARGET else ("At Risk", "#791F1F") if p < ATTENDANCE_WARN else ("Average", "#633806")
 
     rows, rows_plain = [], ""
     for r in subject_reports:
@@ -59,8 +60,8 @@ def send_weekly_parent_email(
         + table
         + T.stat_boxes([(present, "Present", "good"), (total - present, "Absent", "bad"),
                         (f"{overall}%", overall_label, tone)])
-        + (T.notice("Action Required: Attendance is below 75%. Please ensure regular attendance "
-                    "to avoid academic consequences.") if overall < 75 else "")
+        + (T.notice(f"Action Required: Attendance is below {ATTENDANCE_TARGET}%. Please ensure regular attendance "
+                    "to avoid academic consequences.") if overall < ATTENDANCE_TARGET else "")
     )
     html = T.shell("Weekly attendance report", "Weekly report", body,
                    "This is an automated weekly report from SnapClass. "

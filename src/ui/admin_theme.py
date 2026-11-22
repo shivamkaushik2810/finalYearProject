@@ -28,6 +28,8 @@ ADMIN_PAGES = [
      "Messages from students and teachers."),
     ("audit", "Corrections audit", "Corrections audit",
      "Every attendance change, with who made it and why."),
+    ("exports", "Section export", "Section export",
+     "Download one section's attendance, marks and defaulters as a single ZIP."),
     ("system", "System health", "System health",
      "Email quota, approvals waiting and locked accounts."),
 ]

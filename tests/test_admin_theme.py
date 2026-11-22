@@ -3,7 +3,7 @@ from src.ui import admin_theme as t
 
 def test_twelve_unique_pages_matching_the_menu():
     keys = [p[0] for p in t.ADMIN_PAGES]
-    assert len(keys) == len(set(keys)) == 12
+    assert len(keys) == len(set(keys)) == 13
 
 
 def test_theme_uses_admin_tokens_and_no_display_font():

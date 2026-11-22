@@ -8,6 +8,7 @@ from src.services import eligibility_service as elig
 from src.services import schedule_service as sched
 from src.services.pure_logic import csv_safe
 from src.ui.widgets import confirm_dialog
+from src.components.marks_import_ui import marks_import_panel
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -174,7 +175,7 @@ def _schedule(subjects, teacher_id):
 
 def teacher_more_tools(subjects, teacher_id):
     st.header("🧰 More Tools")
-    t1, t2, t3, t4, t5 = st.tabs(["Leave Requests", "Corrections & Audit", "Eligibility", "Schedule & Location", "Accuracy"])
+    t1, t2, t3, t4, t5, t6 = st.tabs(["Leave Requests", "Corrections & Audit", "Eligibility", "Schedule & Location", "Accuracy", "Marks Import"])
     with t1:
         teacher_leave_tab(teacher_id)
     with t2:
@@ -183,5 +184,7 @@ def teacher_more_tools(subjects, teacher_id):
         _eligibility(subjects, teacher_id)
     with t4:
         _schedule(subjects, teacher_id)
+    with t6:
+        marks_import_panel(subjects, teacher_id)
     with t5:
         show_accuracy_page()
