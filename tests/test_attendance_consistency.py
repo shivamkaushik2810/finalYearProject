@@ -30,3 +30,10 @@ def test_same_class_counts_once():
 
 def test_week_bounds():
     assert week_bounds(date(2026, 11, 12)) == (date(2026, 11, 9), date(2026, 11, 15))
+
+
+def test_leave_approved_absence_is_excused():
+    leave_absence = {"subject_id": 1, "timestamp": "2026-11-13T10:00:00", "is_present": False,
+                     "status": "absent", "is_excused": True}
+    s = summarize([leave_absence] + ROWS[:1])
+    assert (s["present"], s["total"], s["pct"]) == (1, 1, 100.0)
