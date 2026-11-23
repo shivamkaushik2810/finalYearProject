@@ -6,6 +6,7 @@ from src.components.header import header_dashboard
 from src.components.footer import footer_dashboard
 from src.database.db import get_children_for_parent
 from src.components.timetable import render_timetable
+from src.ui.portal_theme import inject_portal_theme
 from src.services.otp_service import send_and_save_otp, verify_otp
 from src.components.child_overview import (
     render_child_overview, render_attendance_history,
@@ -18,6 +19,7 @@ OTP_PURPOSE = "parent_login"
 def parent_screen():
     style_background_dashboard()
     style_base_layout()
+    inject_portal_theme()
 
     if "parent_data" in st.session_state:
         parent_dashboard()

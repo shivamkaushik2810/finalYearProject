@@ -82,3 +82,8 @@ htmlcov/
 
 node_modules/
 *.lock
+*.bak.*
+*.pathbak
+_my_full_replacements/
+files_for_claude*.txt
+*.before_*

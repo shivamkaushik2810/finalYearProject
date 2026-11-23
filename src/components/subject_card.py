@@ -23,7 +23,7 @@ def subject_card(name, code, section, stats=None, footer_callback=None, course=N
             bar_html = '<div class="sc-sub">No attendance recorded yet.</div>'
         else:
             bar_html = (progress_html(pct, total=count)
-                        + f'<div class="sc-sub">{pct:.0f}% attendance. The line marks 75%.</div>')
+                        + f'<div class="sc-sub">{pct:.0f}% attendance (all classes). The line marks 75%.</div>')
 
     stats_html = ""
     if stats:

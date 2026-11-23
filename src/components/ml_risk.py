@@ -13,7 +13,7 @@ def _fetch_all_logs(subject_ids, page=1000):
     out, start = [], 0
     while True:
         rows = supabase.table('attendance_logs')\
-            .select('student_id, subject_id, is_present, timestamp, status')\
+            .select('student_id, subject_id, is_present, timestamp, status, is_excused')\
             .in_('subject_id', subject_ids)\
             .order('timestamp').order('subject_id').order('student_id')\
             .range(start, start + page - 1).execute().data or []

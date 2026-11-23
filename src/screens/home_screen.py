@@ -2,6 +2,7 @@ import streamlit as st
 from src.components.header import header_home
 from src.components.footer import footer_home
 from src.ui.base_layout import style_base_layout, style_background_home
+from src.ui.home_fix import inject_home_fix
 
 
 def home_screen():
@@ -9,6 +10,7 @@ def home_screen():
     header_home()
     style_background_home()
     style_base_layout()
+    inject_home_fix()
 
     col1, col2, col3 = st.columns(3, gap="large")
 
@@ -33,8 +35,6 @@ def home_screen():
             st.session_state['login_type'] = 'parent'
             st.rerun()
 
-    st.markdown("<div style='text-align:center;margin-top:10px;'>"
-                "<a href='?admin=1' target='_self' style='color:#E0E3FF;font-size:13px;'>Admin login</a></div>",
-                unsafe_allow_html=True)
+    # The admin link is not shown here. Admins use the private route (ADMIN_ROUTE_KEY).
 
     footer_home()

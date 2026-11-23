@@ -4,7 +4,7 @@ from src.services.email_rules import emails_conflict
 import streamlit as st
 from src.database.config import supabase
 
-STUDENT_LIGHT_COLS = "student_id, name, email, roll_no, section, year, course, parent_email, parent_name"
+STUDENT_LIGHT_COLS = "student_id, name, email, roll_no, section, year, course, parent_email, parent_name, report_frequency"
 PAGE = 1000  # Supabase returns max 1000 rows per request
 
 
@@ -221,7 +221,7 @@ def get_student_subjects(student_id):
 def get_student_attendance(student_id):
     return _fetch_all(
         lambda: supabase.table('attendance_logs')
-        .select('subject_id, is_present, timestamp')
+        .select('subject_id, is_present, timestamp, status, is_excused')
         .eq('student_id', student_id),
         order=('timestamp', 'subject_id'))
 
@@ -288,7 +288,7 @@ def get_weekly_attendance_bulk(week_start, week_end):
     end = str(_to_date(week_end) + timedelta(days=1))
     rows = _fetch_all(
         lambda: supabase.table('attendance_logs')
-        .select('student_id, subject_id, is_present, status')
+        .select('student_id, subject_id, is_present, status, is_excused')
         .gte('timestamp', start).lt('timestamp', end),
         order=('timestamp', 'subject_id', 'student_id'))
     agg = {}
@@ -416,7 +416,7 @@ def get_subject_attendance_stats(subject_id):
     Paginated (no 1000-row cap); cancelled classes and excused absences are left out."""
     rows = _fetch_all(
         lambda: supabase.table('attendance_logs')
-        .select('student_id, is_present, status')
+        .select('student_id, is_present, status, is_excused')
         .eq('subject_id', subject_id),
         order=('timestamp', 'student_id'))
     stats = {}
@@ -604,3 +604,17 @@ def create_attendance_idempotent(logs):
         ignore_duplicates=True
     ).execute()
     return response.data or []
+
+
+def find_subject_for_student(subject_code, student):
+    """Return the subject with this code that belongs to the student's class.
+    If none matches, return the first row so the caller can explain why it is not allowed."""
+    from src.components.filters import can_enroll  # local import avoids a circular import
+    rows = (supabase.table('subjects').select('*, teachers(name)')
+            .ilike('subject_code', subject_code).execute().data or [])
+    if not rows:
+        return None
+    for row in rows:
+        if can_enroll(row, student)[0]:
+            return row
+    return rows[0]

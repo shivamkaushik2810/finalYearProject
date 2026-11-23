@@ -1,7 +1,7 @@
 import time
 import streamlit as st
 from src.database.config import supabase
-from src.database.db import enroll_student_to_subject
+from src.database.db import enroll_student_to_subject, find_subject_for_student
 from src.components.filters import can_enroll, class_label
 from src.components.dialog_enroll import _fresh_student
 
@@ -16,14 +16,12 @@ def auto_enroll_dialog(subject_code):
     student = _fresh_student(st.session_state.student_data)
     student_id = student['student_id']
 
-    res = supabase.table('subjects').select('subject_id, name, course, year, section')\
-        .eq('subject_code', subject_code).execute()
-    if not res.data:
+    subject = find_subject_for_student(subject_code, student)
+    if not subject:
         st.error('Subject Code not found!')
         if st.button('Close'):
             _close()
         return
-    subject = res.data[0]
 
     check = supabase.table('subject_students').select('*')\
         .eq('subject_id', subject['subject_id']).eq('student_id', student_id).execute()

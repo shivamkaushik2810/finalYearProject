@@ -1,7 +1,7 @@
 import time
 import streamlit as st
 from src.database.config import supabase
-from src.database.db import enroll_student_to_subject
+from src.database.db import enroll_student_to_subject, find_subject_for_student
 from src.components.filters import can_enroll, class_label, fetch_all
 
 
@@ -46,11 +46,10 @@ def enroll_dialog():
                               help="Get this code from your teacher").strip()
 
     if join_code:
-        res = supabase.table('subjects').select('*, teachers(name)').ilike('subject_code', join_code).execute()
-        if not res.data:
+        sub = find_subject_for_student(join_code, student)
+        if not sub:
             st.error("❌ Subject not found. Please check the code.")
         else:
-            sub = res.data[0]
             teacher = sub.get('teachers') or {}
             with st.container(border=True):
                 st.write(f"**📚 {sub['name']}**")

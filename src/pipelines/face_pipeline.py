@@ -9,9 +9,10 @@ import face_recognition
 import numpy as np
 
 from src.database.students_query import get_students_with_faces
+from src.pipelines.face_runtime import FACE_RECOGNITION_LOCK
 
 SCAN_JITTERS = int(os.environ.get("SCAN_JITTERS", "1"))
-_SCAN_SLOTS = threading.BoundedSemaphore(int(os.environ.get("SCAN_CONCURRENCY", "2")))
+_SCAN_SLOTS = threading.BoundedSemaphore(int(os.environ.get("SCAN_CONCURRENCY", "1")))
 
 THRESHOLD = 0.55  # lower = stricter (0.6 is the library default)
 
@@ -25,10 +26,13 @@ def _dbg(msg):
 
 
 def get_face_embeddings(image_np):
-    """Extract 128-d face embeddings from image"""
+    """Extract 128-d face embeddings from image."""
     try:
-        locations = face_recognition.face_locations(image_np, model='hog')
-        return face_recognition.face_encodings(image_np, locations, num_jitters=3)
+        with FACE_RECOGNITION_LOCK:
+            locations = face_recognition.face_locations(image_np, model='hog')
+            return face_recognition.face_encodings(
+                image_np, locations, num_jitters=3
+            )
     except Exception:
         return []
 
@@ -56,15 +60,17 @@ def _load_known_faces():
 def _load_known_faces_uncached():
     ids, embs = [], []
     for s in get_students_with_faces():
-        e = s.get('face_embedding')
-        if isinstance(e, str):
-            try:
-                e = json.loads(e)
-            except Exception:
-                continue
-        if e and len(e) == 128:
-            ids.append(s['student_id'])
-            embs.append(e)
+        # registration face plus extra angles: each is its own row for the same student,
+        # so the nearest angle decides the match
+        for e in [s.get('face_embedding')] + list(s.get('face_embeddings') or []):
+            if isinstance(e, str):
+                try:
+                    e = json.loads(e)
+                except Exception:
+                    continue
+            if e and len(e) == 128:
+                ids.append(s['student_id'])
+                embs.append(e)
     return ids, np.array(embs, dtype=float)
 
 
@@ -79,15 +85,17 @@ def _predict_core_unbounded(image_np, enc_out=None):
     Fills enc_out[student_id] = encoding (if a dict is given)."""
     detected, all_ids, num_faces = {}, [], 0
     try:
-        locations = face_recognition.face_locations(image_np, model='hog')
-        num_faces = len(locations)
-        _dbg(f"scan: faces_in_image={num_faces}")
-        if num_faces == 0:
-            return detected, all_ids, num_faces
+        with FACE_RECOGNITION_LOCK:
+            locations = face_recognition.face_locations(image_np, model='hog')
+            num_faces = len(locations)
+            if num_faces == 0:
+                return detected, all_ids, num_faces
 
-        encodings = face_recognition.face_encodings(
-            image_np, locations, num_jitters=SCAN_JITTERS
-        )
+            encodings = face_recognition.face_encodings(
+                image_np, locations, num_jitters=SCAN_JITTERS
+            )
+
+        _dbg(f"scan: faces_in_image={num_faces}")
         ids, known = _load_known_faces()
         _dbg(f"known faces loaded={len(ids)}")
         if len(ids) == 0:

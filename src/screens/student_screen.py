@@ -23,6 +23,10 @@ from src.components.marks_management import show_student_marks
 from src.components.child_overview import render_child_overview, render_announcements
 from src.components.qr_session import student_qr_panel
 from src.components.timetable import render_timetable
+from src.components.leave_ui import student_leave_tab
+from src.components.dialog_add_angles import add_angles_dialog
+from src.services.face_embeddings import all_embeddings
+from src.ui.portal_theme import inject_portal_theme
 
 
 def student_dashboard():
@@ -42,11 +46,16 @@ def student_dashboard():
     st.space()
     show_parent_email_update(student_data)
 
+    if len(all_embeddings(student_data)) < 3:
+        st.warning("📸 Add at least 3 face angles (front, left, right) so you are recognised reliably.")
+        if st.button('Add face angles now', type='primary', key='add_angles_banner'):
+            add_angles_dialog(student_id)
+
     if st.query_params.get('qr-code'):
         student_qr_panel(student_data, key_prefix='qr_top')
         st.divider()
 
-    tab_over, tab1, tab2, tab3 = st.tabs(['🏠 Overview', '📚 My Subjects', '📋 My Attendance', '📝 My Marks'])
+    tab_over, tab1, tab2, tab3, tab_leave = st.tabs(['🏠 Overview', '📚 My Subjects', '📋 My Attendance', '📝 My Marks', '📝 Leave'])
 
     with tab_over:
         student_qr_panel(student_data, key_prefix='qr_ov')
@@ -71,14 +80,11 @@ def student_dashboard():
             subjects = get_student_subjects(student_id)
             logs     = get_student_attendance(student_id)
 
+        from src.services.attendance_summary import summarize
         stats_map = {}
-        for log in logs:
-            sid = log['subject_id']
-            if sid not in stats_map:
-                stats_map[sid] = {"total": 0, "attended": 0}
-            stats_map[sid]['total'] += 1
-            if log.get('is_present'):
-                stats_map[sid]['attended'] += 1
+        for sid in {l['subject_id'] for l in logs if l.get('subject_id')}:
+            v = summarize([l for l in logs if l.get('subject_id') == sid])
+            stats_map[sid] = {'total': v['total'], 'attended': v['present'], 'pct': v['pct']}
 
         if not subjects:
             st.info("Not enrolled in any subject yet. Click 'Enroll in Subject'.")
@@ -106,7 +112,9 @@ def student_dashboard():
                             ('📅', 'Total',    stats['total']),
                             ('✅', 'Attended', stats['attended']),
                         ],
-                        footer_callback=unenroll_button
+                        footer_callback=unenroll_button,
+                        pct=stats.get('pct'),
+                        total=stats['total'],
                     )
 
     with tab2:
@@ -115,41 +123,61 @@ def student_dashboard():
     with tab3:
         show_student_marks(student_id)
 
+    with tab_leave:
+        try:
+            student_leave_tab(student_id)
+        except Exception as e:
+            print(f"Leave tab error: {type(e).__name__}")
+            st.info("Leave requests are not available yet (database setup missing).")
+
     from src.components.feedback import show_feedback_section
     show_feedback_section("student", student_id, student_data["name"])
 
     footer_dashboard()
 
 
+OTP_RESEND_SECONDS = 30
+REG_STEPS = ["Personal", "Verify email", "Parent", "Voice"]
+_REG_SECTIONS = ['A', 'B', 'C', 'D', 'E', 'F']
+_REG_COURSES = ['B.Tech', 'M.Tech', 'MCA', 'BCA', 'MBA', 'B.Sc', 'M.Sc']
+_REG_YEARS = ['1', '2', '3', '4']
+_REG_KEYS = ("reg", "reg_step", "reg_errs")
+
+
 def _otp_verify_section(email, purpose, label, name="User"):
-    is_verified = is_email_verified(email, purpose)
-    if is_verified:
+    if is_email_verified(email, purpose):
         st.success(f"✅ {label} verified!")
         return True
 
-    col1, col2 = st.columns([2, 1])
+    sent_key = f"otp_sent_at_{purpose}_{email}"
+    col1, col2 = st.columns([2, 1], vertical_alignment="bottom")
     with col1:
         otp_input = st.text_input(
-            f"Enter OTP sent to {email}",
+            f"Enter the 6-digit code sent to {email}",
             max_chars=6, placeholder="6-digit OTP",
             key=f"otp_{purpose}"
         )
     with col2:
-        st.write("")
-        st.write("")
-        if st.button(f"Send OTP", key=f"send_otp_{purpose}", type="secondary"):
-            if email and "@" in email:
+        sent_at = st.session_state.get(sent_key)
+        if st.button("Resend code" if sent_at else "Send code", key=f"send_otp_{purpose}", type="secondary"):
+            wait = OTP_RESEND_SECONDS - (time.time() - sent_at) if sent_at else 0
+            if wait > 0:
+                st.warning(f"You can request a new code in {int(wait) + 1} seconds.")
+            elif not (email and "@" in email):
+                st.warning("Please enter a valid email first!")
+            else:
                 with st.spinner(f"Sending OTP to {email}..."):
                     try:
                         send_and_save_otp(email, purpose, name)
+                        st.session_state[sent_key] = time.time()
                         st.success(f"✅ OTP sent to {email}!")
-                    except Exception as e:
-                        st.error(f"Failed: {str(e)}")
-            else:
-                st.warning("Please enter a valid email first!")
+                    except ValueError as e:      # cooldown or hourly limit reported by the OTP service
+                        st.warning(str(e))
+                    except Exception:
+                        st.error("Couldn't send the code. Check the email address and try again.")
 
     if otp_input and len(otp_input) == 6:
-        if st.button(f"Verify OTP", key=f"verify_{purpose}", type="primary"):
+        if st.button("Verify OTP", key=f"verify_{purpose}", type="primary"):
             is_valid, message = verify_otp(email, otp_input, purpose)
             if is_valid:
                 mark_email_verified(email, purpose)
@@ -160,9 +188,202 @@ def _otp_verify_section(email, purpose, label, name="User"):
     return False
 
 
+def _reg_field_error(errs, field):
+    if errs.get(field):
+        st.caption(f":red[{errs[field]}]")
+
+
+def _reg_problem(reg):
+    """First problem with the registration data, or None. The same checks the old single form made."""
+    if not reg.get("name"):
+        return "Please enter your full name!"
+    if not reg.get("roll"):
+        return "Please enter your roll number!"
+    if not reg.get("email"):
+        return "Please enter your email!"
+    if not reg.get("parent_email"):
+        return "Please enter parent email!"
+    ok, msg = validate_parent_email(reg["email"], reg["parent_email"])
+    if not ok:
+        return msg
+    if not is_valid_email(reg["email"]) or not is_valid_email(reg["parent_email"]):
+        return "Please enter valid email addresses!"
+    if emails_conflict(reg["email"], reg["parent_email"]):
+        return "Parent email must be different from the student email!"
+    if not is_email_verified(reg["email"], "student_email"):
+        return "Please verify your student email first!"
+    if not is_email_verified(reg["parent_email"], "parent_email"):
+        return "Please verify parent email first!"
+    return None
+
+
+def _registration_wizard(photo_source):
+    """Guided registration: Personal, Verify email, Parent, Voice. Every check of the old form is still made."""
+    from src.ui.widgets import stepper
+    reg = st.session_state.setdefault("reg", {})
+    step = st.session_state.setdefault("reg_step", 1)
+    errs = st.session_state.get("reg_errs", {})
+
+    with st.container(border=True):
+        st.header('Register new Profile')
+        stepper(REG_STEPS, step)
+
+        if step == 1:
+            col1, col2 = st.columns(2)
+            with col1:
+                name = st.text_input("Full Name *", value=reg.get("name", ""), placeholder='E.g. student Name', key="reg_name")
+                _reg_field_error(errs, "name")
+                email = st.text_input("Your Email *", value=reg.get("email", ""), placeholder='E.g. student@gmail.com', key="reg_email")
+                _reg_field_error(errs, "email")
+            with col2:
+                roll = st.text_input("Roll Number *", value=reg.get("roll", ""), placeholder='E.g. 123456789', key="reg_roll")
+                _reg_field_error(errs, "roll")
+                section = st.selectbox("Section *", options=_REG_SECTIONS,
+                                       index=_REG_SECTIONS.index(reg.get("section", "A")), key="reg_section")
+            course_col, year_col = st.columns(2)
+            with course_col:
+                course = st.selectbox("Course *", options=_REG_COURSES,
+                                      index=_REG_COURSES.index(reg.get("course", _REG_COURSES[0])), key="reg_course")
+            with year_col:
+                year = st.selectbox("Year *", options=_REG_YEARS,
+                                    index=_REG_YEARS.index(reg.get("year", "1")), key="reg_year")
+            if st.button("Continue", type="primary", key="reg_next_1"):
+                reg.update(name=name.strip(), email=email.strip(), roll=roll.strip(),
+                           section=section, course=course, year=year)
+                e = {}
+                if not reg["name"]:
+                    e["name"] = "Please enter your full name!"
+                if not reg["roll"]:
+                    e["roll"] = "Please enter your roll number!"
+                if not reg["email"]:
+                    e["email"] = "Please enter your email!"
+                elif not is_valid_email(reg["email"]):
+                    e["email"] = "Please enter a valid email address!"
+                st.session_state["reg_errs"] = e
+                if not e:
+                    st.session_state["reg_step"] = 2
+                st.rerun()
+
+        elif step == 2:
+            st.write(f"We will verify **{reg['email']}** so you can receive attendance emails.")
+            verified = _otp_verify_section(reg["email"], "student_email", "Student email", reg.get("name") or "Student")
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("Back", type="secondary", key="reg_back_2"):
+                    st.session_state["reg_step"] = 1
+                    st.rerun()
+            with b2:
+                if st.button("Continue", type="primary", key="reg_next_2"):
+                    if verified or is_email_verified(reg["email"], "student_email"):
+                        st.session_state["reg_errs"] = {}
+                        st.session_state["reg_step"] = 3
+                    else:
+                        st.session_state["reg_errs"] = {"otp": "Please verify your student email first!"}
+                    st.rerun()
+            _reg_field_error(errs, "otp")
+
+        elif step == 3:
+            col3, col4 = st.columns(2)
+            with col3:
+                pname = st.text_input("Parent Name *", value=reg.get("parent_name", ""), placeholder='E.g. Parent Name', key="reg_pname")
+                _reg_field_error(errs, "parent_name")
+            with col4:
+                pemail = st.text_input("Parent Email *", value=reg.get("parent_email", ""), placeholder='E.g. parent@gmail.com', key="reg_pemail")
+                _reg_field_error(errs, "parent_email")
+            st.info("📧 Weekly attendance report sent to parent every Monday")
+            pemail = pemail.strip()
+            conflict = bool(pemail) and emails_conflict(reg["email"], pemail)
+            if conflict:
+                st.error("❌ Parent email must be different from your own email. Enter your parent or guardian email.")
+            if pemail and "@" in pemail and not conflict:
+                _otp_verify_section(pemail, "parent_email", "Parent email", pname or "Parent")
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("Back", type="secondary", key="reg_back_3"):
+                    reg.update(parent_name=pname.strip(), parent_email=pemail)
+                    st.session_state["reg_step"] = 2
+                    st.rerun()
+            with b2:
+                if st.button("Continue", type="primary", key="reg_next_3"):
+                    reg.update(parent_name=pname.strip(), parent_email=pemail)
+                    e = {}
+                    if not reg["parent_name"]:
+                        e["parent_name"] = "Please enter your parent's name!"
+                    if not pemail:
+                        e["parent_email"] = "Please enter parent email!"
+                    elif not is_valid_email(pemail):
+                        e["parent_email"] = "Please enter valid email addresses!"
+                    elif emails_conflict(reg["email"], pemail):
+                        e["parent_email"] = "Parent email must be different from the student email!"
+                    else:
+                        ok, msg = validate_parent_email(reg["email"], pemail)
+                        if not ok:
+                            e["parent_email"] = msg
+                        elif not is_email_verified(pemail, "parent_email"):
+                            e["parent_email"] = "Please verify parent email first!"
+                    st.session_state["reg_errs"] = e
+                    if not e:
+                        st.session_state["reg_step"] = 4
+                    st.rerun()
+
+        else:
+            st.subheader('🎤 Optional: Voice Enrollment')
+            st.info("Enroll your voice for voice only attendance. You can skip this step.")
+            audio_data = None
+            try:
+                audio_data = st.audio_input('Record: "I am present, my name is ..." (say your own name)')
+            except Exception:
+                st.error('Audio input failed! You can skip this step.')
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("Back", type="secondary", key="reg_back_4"):
+                    st.session_state["reg_step"] = 3
+                    st.rerun()
+            with b2:
+                create_clicked = st.button('Create Account', type='primary', key="reg_create")
+            if create_clicked:
+                problem = _reg_problem(reg)
+                if problem:
+                    st.error(f"❌ {problem}")
+                else:
+                    with st.spinner('Creating profile..'):
+                        img       = np.array(Image.open(photo_source).convert('RGB'))
+                        encodings = get_face_embeddings(img)
+                        if encodings:
+                            face_emb  = encodings[0].tolist()
+                            voice_emb = None
+                            if audio_data:
+                                voice_emb = get_voice_embedding(audio_data.read())
+                            response_data = create_student(
+                                reg["name"],
+                                face_embedding  = face_emb,
+                                voice_embedding = voice_emb,
+                                email           = reg["email"],
+                                roll_no         = reg["roll"],
+                                section         = reg["section"],
+                                parent_email    = reg["parent_email"],
+                                parent_name     = reg["parent_name"],
+                                year            = reg["year"],
+                                course          = reg["course"]
+                            )
+                            if response_data:
+                                train_classifier()
+                                for k in _REG_KEYS:
+                                    st.session_state.pop(k, None)
+                                st.session_state.is_logged_in = True
+                                st.session_state.user_role    = 'student'
+                                st.session_state.student_data = response_data[0]
+                                st.toast(f"Profile Created! Hi {response_data[0].get('name', '')}!")
+                                time.sleep(1)
+                                st.rerun()
+                        else:
+                            st.error('Could not capture facial features. Try again!')
+
+
 def student_screen():
     style_background_dashboard()
     style_base_layout()
+    inject_portal_theme()
 
     if "student_data" in st.session_state:
         student_dashboard()
@@ -214,7 +435,8 @@ def student_screen():
     if not photo_source:
         for k in ('pending_student', 'pending_frontal', 'liveness_task',
                   'liveness_passed', 'liveness_attempt', 'liveness_steps',
-                  'liveness_idx', 'liveness_start', 'liveness_fails'):
+                  'liveness_idx', 'liveness_start', 'liveness_fails',
+                  'reg', 'reg_step', 'reg_errs'):
             st.session_state.pop(k, None)
 
     if st.session_state.get('pending_student') and not show_registration:
@@ -231,127 +453,6 @@ def student_screen():
             st.rerun()
 
     if show_registration:
-        with st.container(border=True):
-            st.header('Register new Profile')
-
-            st.subheader('👤 Personal Information')
-            col1, col2 = st.columns(2)
-            with col1:
-                new_name  = st.text_input("Full Name *", placeholder='E.g. student Name')
-                new_email = st.text_input("Your Email *", placeholder='E.g. student@gmail.com')
-
-            with col2:
-                new_roll    = st.text_input("Roll Number *", placeholder='E.g. 123456789')
-                new_section = st.selectbox("Section *", options=['A','B','C','D','E','F'])
-
-            course_col, year_col = st.columns(2)
-            with course_col:
-                new_course = st.selectbox("Course *", options=['B.Tech','M.Tech','MCA','BCA','MBA','B.Sc','M.Sc'])
-
-            with year_col:
-                new_year = st.selectbox("Year *", options=['1','2','3','4'])
-
-
-            if new_email and "@" in new_email:
-                st.write("**Verify Your Email:**")
-                student_verified = _otp_verify_section(
-                    new_email, "student_email", "Student email", new_name or "Student"
-                )
-            else:
-                student_verified = False
-
-            st.divider()
-            st.subheader('👨‍👩‍👧 Parent / Guardian Information')
-            col3, col4 = st.columns(2)
-            with col3:
-                parent_name  = st.text_input("Parent Name *", placeholder='E.g. Parent Name')
-            with col4:
-                parent_email = st.text_input("Parent Email *", placeholder='E.g. parent@gmail.com')
-
-            st.info("📧 Weekly attendance report sent to parent every Monday")
-
-            email_conflict = emails_conflict(new_email, parent_email)
-            if email_conflict:
-                st.error("❌ Parent email must be different from your own email. Enter your parent or guardian email.")
-            if parent_email and "@" in parent_email and not email_conflict:
-                st.write("**Verify Parent Email:**")
-                parent_verified = _otp_verify_section(
-                    parent_email, "parent_email", "Parent email", parent_name or "Parent"
-                )
-            else:
-                parent_verified = False
-
-            st.divider()
-            st.subheader('🎤 Optional: Voice Enrollment')
-            st.info("Enroll your voice for voice only attendance")
-            audio_data = None
-            try:
-                audio_data = st.audio_input('Record: I am present, My name is Shivam.')
-            except Exception:
-                st.error('Audio input failed!')
-
-            st.divider()
-            col_s, col_p = st.columns(2)
-            with col_s:
-                if student_verified:
-                    st.success("✅ Student email verified")
-                else:
-                    st.warning("⚠️ Student email not verified")
-            with col_p:
-                if parent_verified:
-                    st.success("✅ Parent email verified")
-                else:
-                    st.warning("⚠️ Parent email not verified")
-
-            if st.button('Create Account', type='primary', width='stretch'):
-                if not new_name:
-                    st.error('Please enter your full name!')
-                elif not new_roll:
-                    st.error('Please enter your roll number!')
-                elif not new_email:
-                    st.error('Please enter your email!')
-                elif not parent_email:
-                    st.error('Please enter parent email!')
-                elif not validate_parent_email(new_email, parent_email)[0]:
-                    st.error(validate_parent_email(new_email, parent_email)[1])
-                elif not is_valid_email(new_email) or not is_valid_email(parent_email):
-                    st.error('Please enter valid email addresses!')
-                elif emails_conflict(new_email, parent_email):
-                    st.error('❌ Parent email must be different from the student email!')
-                elif not student_verified:
-                    st.error('❌ Please verify your student email first!')
-                elif not parent_verified:
-                    st.error('❌ Please verify parent email first!')
-                else:
-                    with st.spinner('Creating profile..'):
-                        img       = np.array(Image.open(photo_source).convert('RGB'))
-                        encodings = get_face_embeddings(img)
-                        if encodings:
-                            face_emb  = encodings[0].tolist()
-                            voice_emb = None
-                            if audio_data:
-                                voice_emb = get_voice_embedding(audio_data.read())
-                            response_data = create_student(
-                                new_name,
-                                face_embedding  = face_emb,
-                                voice_embedding = voice_emb,
-                                email           = new_email,
-                                roll_no         = new_roll,
-                                section         = new_section,
-                                parent_email    = parent_email,
-                                parent_name     = parent_name,
-                                year            = new_year,
-                                course          = new_course
-                            )
-                            if response_data:
-                                train_classifier()
-                                st.session_state.is_logged_in = True
-                                st.session_state.user_role    = 'student'
-                                st.session_state.student_data = response_data[0]
-                                st.toast(f'Profile Created! Hi {new_name}!')
-                                time.sleep(1)
-                                st.rerun()
-                        else:
-                            st.error('Could not capture facial features. Try again!')
+        _registration_wizard(photo_source)
 
     footer_dashboard()

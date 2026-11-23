@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from src.services.thresholds import ATTENDANCE_TARGET, ATTENDANCE_WARN
 from src.services.email_service import _get_config
 
 
@@ -30,13 +31,13 @@ def _png(fig):
 def _attendance_chart(subject_rows):
     names = [r["subject"] for r in subject_rows]
     pcts = [r["pct"] for r in subject_rows]
-    colors = ["#28a745" if p >= 75 else "#f39c12" if p >= 50 else "#e74c3c" for p in pcts]
+    colors = ["#28a745" if p >= ATTENDANCE_TARGET else "#f39c12" if p >= ATTENDANCE_WARN else "#e74c3c" for p in pcts]
     fig, ax = plt.subplots(figsize=(6.4, 3.2))
     ax.bar(names, pcts, color=colors)
-    ax.axhline(75, color="#5865F2", ls="--", lw=1)
+    ax.axhline(ATTENDANCE_TARGET, color="#5865F2", ls="--", lw=1)
     ax.set_ylim(0, 100)
     ax.set_ylabel("Attendance %")
-    ax.set_title("Subject-wise Attendance (dashed line = 75%)")
+    ax.set_title(f"Subject-wise Attendance (dashed line = {ATTENDANCE_TARGET}%)")
     plt.xticks(rotation=25, ha="right")
     return _png(fig)
 
@@ -44,7 +45,7 @@ def _attendance_chart(subject_rows):
 def _trend_chart(monthly):
     fig, ax = plt.subplots(figsize=(6.4, 3.0))
     ax.plot(monthly["month"], monthly["pct"], marker="o", color="#5865F2")
-    ax.axhline(75, color="#e74c3c", ls="--", lw=1)
+    ax.axhline(ATTENDANCE_TARGET, color="#e74c3c", ls="--", lw=1)
     ax.set_ylim(0, 100)
     ax.set_ylabel("Attendance %")
     ax.set_title("Monthly Attendance Trend")
@@ -124,7 +125,7 @@ def send_defaulter_report(parent_email, parent_name, student, overall_pct,
 <p>The overall attendance of your ward <b>{_e(student['name'])}</b>
 (Roll {_e(student.get('roll_no') or 'N/A')}, {_e(student.get('course') or '')}
 Year {_e(student.get('year') or '')}, Section {_e(student.get('section') or 'N/A')})
-is <b style="color:#e74c3c;">{overall_pct}%</b>, which is below the required 75%.</p>
+is <b style="color:#e74c3c;">{overall_pct}%</b>, which is below the required {ATTENDANCE_TARGET}%.</p>
 <h3>Subject-wise Attendance</h3>{subj_tbl}{img('att', 'attendance')}
 <h3>Monthly Trend</h3>{img('trend', 'trend') or '<p style="color:#999">Not enough data.</p>'}
 <h3>Marks</h3>{marks_tbl}{img('marks', 'marks')}
@@ -134,7 +135,7 @@ Automated message from SnapClass. Please encourage regular attendance.</p>
 </div></body></html>"""
 
     plain = (f"Dear {parent_name or 'Parent'},\n\nAttendance of {student['name']} is "
-             f"{overall_pct}% (below 75%).\n\n" +
+             f"{overall_pct}% (below {ATTENDANCE_TARGET}%).\n\n" +
              "\n".join(f"{r['subject']}: {r['attended']}/{r['total']} ({r['pct']}%)"
                        for r in subject_rows) + "\n\n— SnapClass")
 

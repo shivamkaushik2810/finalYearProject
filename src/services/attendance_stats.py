@@ -1,8 +1,7 @@
 """Pure helpers for attendance maths. No Streamlit or database imports, so they are easy to test."""
 import math
 
-GOOD_PCT = 75
-AVG_PCT = 50
+from src.services.thresholds import ATTENDANCE_TARGET as GOOD_PCT, ATTENDANCE_WARN as AVG_PCT
 
 
 def _is_present(v):

@@ -108,6 +108,14 @@ def _get_active(subject_id):
 
 
 def _start_session(subject_id, teacher_id, minutes):
+    try:                                    # timetable rule; no slots set = always allowed
+        from src.services.schedule_service import check_session_allowed
+        allowed, why = check_session_allowed(subject_id)
+    except Exception as e:                  # a setup problem must not block taking attendance
+        print(f"Schedule check skipped: {type(e).__name__}")
+        allowed, why = True, ""
+    if not allowed:
+        raise ValueError(why)
     now = _now()
     row = {
         'subject_id':   subject_id,
@@ -210,6 +218,15 @@ def mark_attendance(student_id, code):
         .eq('student_id', student_id).eq('subject_id', subject_id).execute()
     if not enrolled.data:
         return False, "You are not enrolled in this subject."
+
+    try:                                    # location / classroom-network rule; off unless the teacher enabled it
+        from src.components.session_guards import guard_scan
+        allowed, why = guard_scan(subject_id)
+    except Exception as e:
+        print(f"Location check skipped: {type(e).__name__}")
+        allowed, why = True, ""
+    if not allowed:
+        return False, why
 
     ok, _ = record_scan(_sid(session), student_id, subject_id, 'qr')
     if not ok:

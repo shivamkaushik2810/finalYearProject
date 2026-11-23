@@ -9,6 +9,8 @@ from src.database.db import (
 )
 from src.services.weekly_report_service import send_weekly_parent_email
 from src.services.email_rules import emails_conflict
+from src.services.report_policy import should_send
+from src.services.thresholds import ATTENDANCE_TARGET
 from src.services.mail_pool import pooled_smtp
 
 MAX_EMAILS_PER_RUN = int(os.getenv("MAX_EMAILS_PER_RUN", "450"))   # Gmail daily limit safety
@@ -60,6 +62,7 @@ def send_weekly_reports_to_all_parents(force=False):
     limit = TEST_LIMIT if test else MAX_EMAILS_PER_RUN
 
     success, failed, no_classes, pending = 0, 0, 0, []
+    skipped_by_pref = 0
     try:
         with pooled_smtp():
             for stu in students:
@@ -97,6 +100,12 @@ def send_weekly_reports_to_all_parents(force=False):
                     if not reports:
                         no_classes += 1
                         continue
+                    done_total = sum(r['total'] for r in reports)
+                    done_att = sum(r['attended'] for r in reports)
+                    overall = round(done_att / done_total * 100, 1) if done_total else None
+                    if not should_send(stu.get('report_frequency'), overall, ATTENDANCE_TARGET):
+                        skipped_by_pref += 1
+                        continue
 
                     to_addr = TEST_EMAIL_TO or stu['parent_email']
                     if DRY_RUN:
@@ -116,9 +125,13 @@ def send_weekly_reports_to_all_parents(force=False):
                     if not test:
                         pending.extend(rows)   # saved only after the email really went out
                     success += 1
-                    if len(pending) >= 500:
-                        save_weekly_reports_bulk(pending)
-                        pending = []
+                    if pending:   # record this parent now: a crash must not cause a repeat email next run
+                        try:
+                            save_weekly_reports_bulk(pending)
+                            pending = []
+                        except Exception as save_err:
+                            print(f"  ⚠️ could not record the report for {stu.get('name', 'Unknown')} yet "
+                                  f"({type(save_err).__name__}); will retry with the next parent")
                 except Exception as e:
                     failed += 1
                     print(f"  ❌ Failed for {stu.get('name', 'Unknown')}: {e}")
@@ -127,5 +140,6 @@ def send_weekly_reports_to_all_parents(force=False):
             save_weekly_reports_bulk(pending)
 
     print(f"Skipped (no classes in {week_start} to {week_end}): {no_classes}")
+    print(f"Skipped by parent preference: {skipped_by_pref}")
     print(f"Done! Success: {success}, Failed: {failed}")
     return success, failed

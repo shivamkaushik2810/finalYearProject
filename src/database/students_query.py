@@ -4,14 +4,22 @@ PAGE = 1000
 
 
 def get_students_with_faces():
-    """All students that have a face embedding (paginated, stable order, no 1000-row cap)."""
+    """All students that have a face embedding (paginated, stable order, no 1000-row cap).
+    Includes the extra face angles (face_embeddings) when that column exists."""
+    cols = 'student_id, name, face_embedding, face_embeddings'
     rows, start = [], 0
     while True:
-        res = supabase.table('students') \
-            .select('student_id, name, face_embedding') \
-            .not_.is_('face_embedding', 'null') \
-            .order('student_id') \
-            .range(start, start + PAGE - 1).execute()
+        try:
+            res = supabase.table('students') \
+                .select(cols) \
+                .not_.is_('face_embedding', 'null') \
+                .order('student_id') \
+                .range(start, start + PAGE - 1).execute()
+        except Exception:
+            if cols == 'student_id, name, face_embedding':
+                raise
+            cols = 'student_id, name, face_embedding'      # extra-angles column not migrated yet
+            continue
         batch = res.data or []
         rows.extend(batch)
         if len(batch) < PAGE:

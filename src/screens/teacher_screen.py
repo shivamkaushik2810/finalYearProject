@@ -46,8 +46,10 @@ import logging
 from src.services import attendance_stats as S
 from src.components.charts import attendance_trend, subject_bars
 from src.ui.widgets import empty_state, stat_cards
+from src.ui.teacher_theme import inject_teacher_theme, teacher_brand_html
 
 _log = logging.getLogger(__name__)
+from src.services.attendance_summary import summarize, scope_label
 
 TEACHER_NAV = {
     "overview": ":material/dashboard: Overview",
@@ -58,12 +60,14 @@ TEACHER_NAV = {
     "marks": ":material/grade: Marks",
     "ai_insights": ":material/smart_toy: Insights",
     "analytics": ":material/monitoring: Analytics",
+    "more_tools": ":material/build: Tools",
 }
 
 
 def teacher_screen():
     style_background_dashboard()
     style_base_layout()
+    inject_teacher_theme()
 
     if "teacher_data" in st.session_state:
         teacher_dashboard()
@@ -93,17 +97,17 @@ def teacher_dashboard():
     with st.spinner("Loading your subjects.."):
         subjects = get_teacher_subjects(teacher_id)
 
-    # one navigation row. The state key is the same one other code already uses.
+    # sidebar navigation. The state key is the same one other code already uses.
     if st.session_state.get("current_teacher_tab") not in TEACHER_NAV:
         st.session_state.current_teacher_tab = st.session_state.get("_last_teacher_tab") or "overview"
-    picked = st.segmented_control(
-        "Section", list(TEACHER_NAV), format_func=TEACHER_NAV.get,
-        key="current_teacher_tab", label_visibility="collapsed",
-    )
+    with st.sidebar:
+        st.markdown(teacher_brand_html(), unsafe_allow_html=True)
+        picked = st.radio(
+            "Menu", list(TEACHER_NAV), format_func=TEACHER_NAV.get,
+            key="current_teacher_tab", label_visibility="collapsed",
+        )
     if picked:
         st.session_state["_last_teacher_tab"] = picked
-
-    st.divider()
 
     current = picked or st.session_state.get("_last_teacher_tab") or "overview"
     if current == "overview":
@@ -122,6 +126,13 @@ def teacher_dashboard():
         teacher_tab_ai_insights(subjects, teacher_id)
     elif current == "analytics":
         teacher_analytics_tab(subjects, teacher_id)
+    elif current == "more_tools":
+        try:
+            from src.components.teacher_tools import teacher_more_tools
+            teacher_more_tools(subjects, teacher_id)
+        except Exception:
+            _log.exception("Tools tab failed")
+            st.error("Tools could not load. Check the database setup (sql/migrations) and the terminal log.")
 
     from src.components.feedback import show_feedback_section
     show_feedback_section("teacher", teacher_id, teacher_name)
@@ -134,7 +145,7 @@ def _goto_tab(tab):
 
 
 def _load_subject_logs(subjects):
-    """{subject_id: eligible logs}. Same helpers as AI Insights, so the numbers match."""
+    """{subject_id: eligible logs}. Same rules as the student screens (attendance_summary)."""
     out, failed = {}, []
     for s in subjects:
         sid = s["subject_id"]
@@ -150,9 +161,23 @@ def _subject_pct_map(subjects):
     logs_by_sid, _ = _load_subject_logs(subjects)
     result = {}
     for sid, rows in logs_by_sid.items():
-        t = S.overall(rows)
+        t = summarize(rows)
         result[sid] = (t["pct"], t["total"])
     return result
+
+
+def _at_risk_count(logs_by_sid):
+    """Distinct students below 75% in at least one subject, using the same summarize rules."""
+    at_risk = set()
+    for rows in logs_by_sid.values():
+        by_student = {}
+        for r in rows:
+            by_student.setdefault(r.get("student_id"), []).append(r)
+        for stu, srows in by_student.items():
+            v = summarize(srows)
+            if v["pct"] is not None and v["pct"] < 75:
+                at_risk.add(stu)
+    return len(at_risk)
 
 
 def teacher_tab_overview(subjects):
@@ -168,18 +193,20 @@ def teacher_tab_overview(subjects):
     with st.spinner("Loading attendance..."):
         logs_by_sid, failed = _load_subject_logs(subjects)
     if failed:
-        st.warning("Couldn't load attendance for: " + ", ".join(failed) + ". The numbers below leave them out.")
+        st.warning("Couldn't load attendance for: " + ", ".join(failed)
+                   + ". The numbers below leave them out.")
 
     all_logs = [dict(row, subject_id=sid) for sid, rows in logs_by_sid.items() for row in rows]
-    total = S.overall(all_logs)
-    at_risk = len(S.at_risk_students(all_logs))
+    total = summarize(all_logs)
     last = pd.to_datetime(S.last_session(all_logs), errors="coerce")
     last_txt = "None yet" if pd.isna(last) else f"{last:%d %b, %I:%M %p}"
-    tone = ("" if not total["total"] else "good" if total["pct"] >= 75
-            else "avg" if total["pct"] >= 50 else "bad")
+    pct = total["pct"]
+    pct_txt = f"{pct:.0f}%" if pct is not None else "No data"
+    tone = "" if pct is None else "good" if pct >= 75 else "avg" if pct >= 50 else "bad"
+    at_risk = _at_risk_count(logs_by_sid)
     stat_cards([
         ("Subjects", len(subjects), ""),
-        ("Average attendance", f"{total['pct']:.0f}%" if total["total"] else "No data", tone),
+        (f"Average attendance ({scope_label()})", pct_txt, tone),
         ("At-risk students", at_risk, "bad" if at_risk else "good"),
         ("Last session", last_txt, ""),
     ])
@@ -187,17 +214,20 @@ def teacher_tab_overview(subjects):
     cols = st.columns(2)
     chart_rows = []
     for i, sub in enumerate(subjects):
-        loaded = sub["subject_id"] in logs_by_sid  # a subject that failed to load shows no numbers
-        t = S.overall(logs_by_sid.get(sub["subject_id"], []))
-        if loaded:
+        sid = sub["subject_id"]
+        loaded = sid in logs_by_sid
+        t = summarize(logs_by_sid.get(sid, []))
+        shown = loaded and t["pct"] is not None
+        if shown:
             chart_rows.append((sub["name"], t["pct"]))
         with cols[i % 2]:
             subject_card(
                 name=sub["name"], code=sub["subject_code"], section=sub["section"],
                 course=sub.get("course"), year=sub.get("year"),
-                stats=[("\U0001FAC2", "Students", sub["total_students"]),
-                       ("\U0001F570\uFE0F", "Classes", sub["total_classes"])],
-                pct=t["pct"] if loaded else None, total=t["total"] if loaded else None,
+                stats=[("🫂", "Students", sub["total_students"]),
+                       ("🕰️", "Classes", sub["total_classes"])],
+                pct=t["pct"] if shown else None,
+                total=t["total"] if shown else None,
             )
 
     c1, c2 = st.columns(2)
@@ -357,7 +387,7 @@ def teacher_tab_manage_subjects():
 
             # default-arg binding so each card's button uses ITS OWN subject
             def share_btn(sub=sub):
-                if st.button(f"Share Code: {sub['name']}", key=f"share_{sub['subject_code']}", icon=":material/share:"):
+                if st.button(f"Share Code: {sub['name']}", key=f"share_{sub['subject_id']}", icon=":material/share:"):
                     share_subject_dialog(sub['name'], sub['subject_code'])
                 st.space()
 

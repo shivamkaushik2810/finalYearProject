@@ -9,6 +9,7 @@ from src.screens.admin_screen import admin_screen
 from src.components.dialog_auto_enroll import auto_enroll_dialog
 from src.services.scheduler import check_and_send_weekly_reports
 from src.pipelines.self_learning import start_background_retrain_check
+from src.services.admin_route import admin_route_allowed, admin_secret
 
 
 def main():
@@ -31,7 +32,7 @@ def main():
         st.session_state['login_type'] = 'student'
 
     # Admin link on the home page: /?admin=1
-    if st.query_params.get('admin') and st.session_state['login_type'] is None:
+    if admin_route_allowed(st.query_params, admin_secret()) and st.session_state['login_type'] is None:
         st.session_state['login_type'] = 'admin'
 
     match st.session_state['login_type']:
