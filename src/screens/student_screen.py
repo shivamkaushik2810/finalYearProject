@@ -80,14 +80,11 @@ def student_dashboard():
             subjects = get_student_subjects(student_id)
             logs     = get_student_attendance(student_id)
 
+        from src.services.attendance_summary import summarize
         stats_map = {}
-        for log in logs:
-            sid = log['subject_id']
-            if sid not in stats_map:
-                stats_map[sid] = {"total": 0, "attended": 0}
-            stats_map[sid]['total'] += 1
-            if log.get('is_present'):
-                stats_map[sid]['attended'] += 1
+        for sid in {l['subject_id'] for l in logs if l.get('subject_id')}:
+            v = summarize([l for l in logs if l.get('subject_id') == sid])
+            stats_map[sid] = {'total': v['total'], 'attended': v['present'], 'pct': v['pct']}
 
         if not subjects:
             st.info("Not enrolled in any subject yet. Click 'Enroll in Subject'.")
@@ -115,7 +112,9 @@ def student_dashboard():
                             ('📅', 'Total',    stats['total']),
                             ('✅', 'Attended', stats['attended']),
                         ],
-                        footer_callback=unenroll_button
+                        footer_callback=unenroll_button,
+                        pct=stats.get('pct'),
+                        total=stats['total'],
                     )
 
     with tab2:

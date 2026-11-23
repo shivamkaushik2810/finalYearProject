@@ -221,7 +221,7 @@ def get_student_subjects(student_id):
 def get_student_attendance(student_id):
     return _fetch_all(
         lambda: supabase.table('attendance_logs')
-        .select('subject_id, is_present, timestamp')
+        .select('subject_id, is_present, timestamp, status, is_excused')
         .eq('student_id', student_id),
         order=('timestamp', 'subject_id'))
 
