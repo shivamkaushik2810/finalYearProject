@@ -25,7 +25,7 @@ def _icon(pct):
 
 def _load_logs(student_id):
     res = supabase.table('attendance_logs')\
-        .select('student_id, subject_id, is_present, timestamp, status, subjects(name, subject_code)')\
+        .select('student_id, subject_id, is_present, timestamp, status, is_excused, subjects(name, subject_code)')\
         .eq('student_id', student_id)\
         .order('timestamp', desc=True)\
         .execute()

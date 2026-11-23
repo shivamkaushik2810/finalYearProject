@@ -288,7 +288,7 @@ def get_weekly_attendance_bulk(week_start, week_end):
     end = str(_to_date(week_end) + timedelta(days=1))
     rows = _fetch_all(
         lambda: supabase.table('attendance_logs')
-        .select('student_id, subject_id, is_present, status')
+        .select('student_id, subject_id, is_present, status, is_excused')
         .gte('timestamp', start).lt('timestamp', end),
         order=('timestamp', 'subject_id', 'student_id'))
     agg = {}
@@ -416,7 +416,7 @@ def get_subject_attendance_stats(subject_id):
     Paginated (no 1000-row cap); cancelled classes and excused absences are left out."""
     rows = _fetch_all(
         lambda: supabase.table('attendance_logs')
-        .select('student_id, is_present, status')
+        .select('student_id, is_present, status, is_excused')
         .eq('subject_id', subject_id),
         order=('timestamp', 'student_id'))
     stats = {}

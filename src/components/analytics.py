@@ -21,7 +21,7 @@ def _enrolled(subject_id):
 
 def _logs(subject_id):
     res = _NS(data=_fetch_all(
-        lambda: supabase.table('attendance_logs').select('student_id, is_present, timestamp, status').eq('subject_id', subject_id),
+        lambda: supabase.table('attendance_logs').select('student_id, is_present, timestamp, status, is_excused').eq('subject_id', subject_id),
         order=('timestamp', 'student_id')))
     return eligible(res.data)
 
