@@ -16,7 +16,7 @@ def show_student_attendance_list(student_id):
         .eq('student_id', student_id)\
         .order('timestamp', desc=True)\
         .execute()
-    logs = eligible(res.data or [])
+    logs = res.data or []
     if not logs:
         st.info("No attendance records found yet.")
         return
@@ -69,6 +69,8 @@ def show_student_attendance_list(student_id):
             st.divider()
             st.write("**Session-wise Details:**")
             for log in sorted(entry['logs'], key=lambda l: str(l.get('timestamp')), reverse=True):
+                if str(log.get('status') or '').lower() == 'cancelled':
+                    continue
                 try:
                     dts = datetime.fromisoformat(str(log['timestamp']).replace('Z', '')).strftime("%d %b %Y, %I:%M %p")
                 except Exception:
