@@ -15,7 +15,8 @@ from src.services.admin_route import admin_route_allowed, admin_secret
 def main():
     st.set_page_config(
         page_title='SnapClass - Making Attendance faster using AI',
-        page_icon="https://i.ibb.co/YTYGn5qV/logo.png"
+        page_icon="https://i.ibb.co/YTYGn5qV/logo.png",
+        initial_sidebar_state="expanded"
     )
 
     # Monday weekly parent reports (background, once per process)

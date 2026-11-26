@@ -87,3 +87,7 @@ node_modules/
 _my_full_replacements/
 files_for_claude*.txt
 *.before_*
+*.save
+yolov8n.pt
+*.bak*
+*.pathbak

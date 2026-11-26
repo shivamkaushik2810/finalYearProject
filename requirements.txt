@@ -1,4 +1,7 @@
 streamlit
+httpx==0.28.1
+requests
+streamlit-js-eval
 # Utilities
 numpy
 opencv-python==4.10.0.84

@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: weekly-parent-reports
+  cancel-in-progress: false
+
 jobs:
   send:
     runs-on: ubuntu-latest
