@@ -153,3 +153,95 @@ Automated message from SnapClass. Please encourage regular attendance.</p>
         s.ehlo(); s.starttls()
         s.login(cfg["sender_email"], cfg["sender_password"])
         s.sendmail(cfg["sender_email"], parent_email, msg.as_string())
+
+
+def send_defaulter_family_report(parent_email, parent_name, children):
+    """One email to one parent covering every child who is a defaulter.
+    children: list of dicts with keys: student, overall_pct, subject_rows, session_rows, marks_rows, monthly.
+    Each child keeps the same tables and charts as send_defaulter_report, under unique image IDs."""
+    from src.services.smtp_config import open_smtp
+
+    names = ", ".join(c["student"]["name"] for c in children)
+    msg = MIMEMultipart("related")
+    msg["Subject"] = f"⚠️ Attendance Alert — {len(children)} child(ren) below {ATTENDANCE_TARGET}%"
+    msg["To"] = parent_email
+
+    sections, images = [], {}
+    for i, c in enumerate(children):
+        student, subject_rows = c["student"], c["subject_rows"]
+        session_rows, marks_rows = c["session_rows"], c["marks_rows"]
+        monthly, overall_pct = c["monthly"], c["overall_pct"]
+        prefix = f"c{i}_"
+
+        if subject_rows:
+            images[prefix + "att"] = _attendance_chart(subject_rows)
+        if monthly is not None and len(monthly) > 1:
+            images[prefix + "trend"] = _trend_chart(monthly)
+        if marks_rows:
+            images[prefix + "marks"] = _marks_chart(marks_rows)
+
+        def img(key, alt):
+            return (f"<img src='cid:{prefix}{key}' alt='{alt}' style='max-width:100%;margin:10px 0;'/>"
+                    if (prefix + key) in images else "")
+
+        subj_tbl = _table(
+            ["Subject", "Attended", "Total", "Percentage"],
+            [(r["subject"], r["attended"], r["total"], f"{r['pct']}%") for r in subject_rows])
+        marks_tbl = _table(
+            ["Subject", "Exam", "Marks", "Percentage"],
+            [(r["subject"], r["exam"], f"{r['obtained']}/{r['max']}", f"{r['pct']}%")
+             for r in marks_rows])
+        sess_tbl = _table(
+            ["Date", "Subject", "Status"],
+            [(d, s, _Raw(f"<b style='color:{'#28a745' if st == 'Present' else '#e74c3c'}'>{_e(st)}</b>"))
+             for d, s, st in session_rows])
+
+        sections.append(f"""
+<h3 style="margin-top:28px;border-top:1px solid #eee;padding-top:16px;">
+{_e(student['name'])} &nbsp;<span style="color:#888;font-weight:normal;">
+(Roll {_e(student.get('roll_no') or 'N/A')}, Section {_e(student.get('section') or 'N/A')})</span></h3>
+<p>Overall attendance: <b style="color:#e74c3c;">{overall_pct}%</b>, below the required {ATTENDANCE_TARGET}%.</p>
+<h4>Subject-wise Attendance</h4>{subj_tbl}{img('att', 'attendance')}
+<h4>Monthly Trend</h4>{img('trend', 'trend') or '<p style="color:#999">Not enough data.</p>'}
+<h4>Marks</h4>{marks_tbl}{img('marks', 'marks')}
+<h4>Recent Attendance Records</h4>{sess_tbl}""")
+
+    html = f"""<html><body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:20px;">
+<div style="max-width:680px;margin:auto;background:#fff;border-radius:12px;padding:24px;">
+<h2 style="color:#5865F2;margin-top:0;">📷 SnapClass — Attendance Alert</h2>
+<p>Dear <b>{_e(parent_name or 'Parent')}</b>,</p>
+<p>The attendance of your {'ward' if len(children) == 1 else 'wards'} <b>{_e(names)}</b> is below the required {ATTENDANCE_TARGET}%.</p>
+{''.join(sections)}
+<p style="color:#999;font-size:12px;margin-top:20px;">
+Automated message from SnapClass. Please encourage regular attendance.</p>
+</div></body></html>"""
+
+    plain_parts = [f"Dear {parent_name or 'Parent'},", "",
+                   f"Attendance below the required {ATTENDANCE_TARGET}% for: {names}", ""]
+    for c in children:
+        plain_parts.append(f"{c['student']['name']}: {c['overall_pct']}%")
+        plain_parts += [f"  {r['subject']}: {r['attended']}/{r['total']} ({r['pct']}%)"
+                        for r in c["subject_rows"]]
+        plain_parts.append("")
+    plain_parts.append("— SnapClass")
+    plain = "\n".join(plain_parts)
+
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(plain, "plain"))
+    alt.attach(MIMEText(html, "html"))
+    msg.attach(alt)
+    for cid, data in images.items():
+        part = MIMEImage(data, _subtype="png")
+        part.add_header("Content-ID", f"<{cid}>")
+        part.add_header("Content-Disposition", "inline", filename=f"{cid}.png")
+        msg.attach(part)
+
+    cfg_server, cfg = open_smtp()
+    try:
+        msg["From"] = f"SnapClass <{cfg['sender']}>"
+        cfg_server.sendmail(cfg["sender"], parent_email, msg.as_string())
+    finally:
+        try:
+            cfg_server.quit()
+        except Exception:
+            pass
