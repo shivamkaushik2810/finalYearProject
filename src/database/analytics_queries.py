@@ -30,8 +30,9 @@ def load_core_frames():
         "student_id,name,roll_no,section,year,course,email,parent_email,parent_name"))
     subjects = pd.DataFrame(_fetch_all("subjects", "*"))
     teachers = pd.DataFrame(_fetch_all("teachers", "teacher_id,name,username,email"))
-    logs = pd.DataFrame(_fetch_all(
-        "attendance_logs", "student_id,subject_id,timestamp,is_present"))
+    from src.database.attendance_status import eligible
+    logs = pd.DataFrame(eligible(_fetch_all(
+        "attendance_logs", "student_id,subject_id,timestamp,is_present,status,is_excused")))
     marks = pd.DataFrame(_fetch_all(
         "marks", "student_id,subject_id,marks_obtained,max_marks,exam_type"))
 
