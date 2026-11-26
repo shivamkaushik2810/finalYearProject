@@ -6,6 +6,7 @@ from src.components.header import header_dashboard
 from src.components.footer import footer_dashboard
 from src.database.db import get_children_for_parent
 from src.components.timetable import render_timetable
+from src.components.published_timetable_ui import show_student_timetable
 from src.ui.portal_theme import inject_portal_theme
 from src.services.otp_service import send_and_save_otp, verify_otp
 from src.components.child_overview import (
@@ -128,7 +129,7 @@ def parent_dashboard():
     with t1:
         render_child_overview(sid, viewer="parent")
         st.divider()
-        render_timetable(sid)
+        show_student_timetable(child)
     with t2:
         render_attendance_history(sid, viewer="parent")
     with t3:

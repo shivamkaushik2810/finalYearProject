@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from src.services.thresholds import ATTENDANCE_TARGET, ATTENDANCE_WARN
 from src.database.analytics_queries import load_core_frames, student_attendance_summary
-from src.services.defaulter_email_service import send_defaulter_report
+from src.services.defaulter_email_service import send_defaulter_report, send_defaulter_family_report
 
 
 def _build_report(student_id, logs, subjects, marks):
@@ -71,6 +71,15 @@ def show_defaulter_email_panel(teacher_id=None, key="def"):
     with c3:
         search = st.text_input("Search name / roll", key=f"{key}_q")
 
+    f1, f2 = st.columns(2)
+    courses = ["All"] + sorted(students["course"].dropna().astype(str).unique().tolist())
+    years = ["All"] + sorted(students["year"].dropna().astype(str).unique().tolist())
+    course_pick = f1.selectbox("Course", courses, key=f"{key}_course")
+    year_pick = f2.selectbox("Year", years, key=f"{key}_year")
+    if course_pick != "All":
+        students = students[students["course"].astype(str) == course_pick]
+    if year_pick != "All":
+        students = students[students["year"].astype(str) == year_pick]
     summ = student_attendance_summary(students, logs)
     summ = summ[(summ["total"] > 0) & (summ["pct"] < threshold)]
     if sec != "All":
@@ -88,12 +97,32 @@ def show_defaulter_email_panel(teacher_id=None, key="def"):
 
     table = summ[["name", "roll_no", "section", "parent_name", "parent_email", "present", "total", "pct"]].copy()
     table.insert(0, "Select", False)
+
+    def _has_email(v):
+        return bool(v) and "@" in str(v)
+
+    usable = [bool(_has_email(v)) for v in table["parent_email"]]
+    st.caption(f"{sum(usable)} of {len(table)} have a parent email address.")
+    b1, b2, b3 = st.columns(3)
+    if b1.button("Select all shown", key=f"{key}_all"):
+        st.session_state[f"{key}_pick"] = [True] * len(table)
+    if b2.button("Select all with a parent email", key=f"{key}_all_email"):
+        st.session_state[f"{key}_pick"] = usable
+    if b3.button("Clear selection", key=f"{key}_none"):
+        st.session_state[f"{key}_pick"] = [False] * len(table)
+    if f"{key}_pick" in st.session_state and len(st.session_state[f"{key}_pick"]) == len(table):
+        table["Select"] = st.session_state[f"{key}_pick"]
+
     edited = st.data_editor(
         table, hide_index=True, width="stretch", key=f"{key}_editor",
         disabled=[c for c in table.columns if c != "Select"],
         column_config={"Select": st.column_config.CheckboxColumn("Select"),
                        "pct": st.column_config.NumberColumn("Attendance %", format="%.1f")})
+    st.session_state[f"{key}_pick"] = [bool(v) for v in edited["Select"]]
     chosen = summ.loc[edited.index[edited["Select"]]]
+    no_email = sum(1 for v in chosen["parent_email"] if not _has_email(v))
+    if no_email:
+        st.warning(f"{no_email} selected student(s) have no parent email and will be skipped.")
     if len(chosen) > 200:
         st.warning("Only the first 200 selected students are sent per click.")
         chosen = chosen.head(200)
@@ -112,23 +141,52 @@ def show_defaulter_email_panel(teacher_id=None, key="def"):
         except Exception as e:
             return False, str(e)
 
+    def _send_grouped(rows):
+        """One email per parent address. A parent with one child gets the single-student email;
+        a parent with several children gets one family email covering all of them."""
+        groups = {}
+        skipped = 0
+        for _, r in rows.iterrows():
+            email = r.get("parent_email")
+            if not email or "@" not in str(email):
+                skipped += 1
+                continue
+            groups.setdefault(str(email).strip().lower(), []).append(r)
+        sent_emails = failed_emails = 0
+        bar = st.progress(0.0)
+        for i, (email, members) in enumerate(groups.items(), 1):
+            try:
+                if len(members) == 1:
+                    ok, err = _send(members[0])
+                    if not ok:
+                        raise RuntimeError(err)
+                else:
+                    children = []
+                    for r in members:
+                        sr, sess, mr, monthly = _build_report(r["student_id"], logs, subjects, marks)
+                        children.append({
+                            "student": {k: r.get(k) for k in ("name", "roll_no", "section", "course", "year")},
+                            "overall_pct": r["pct"], "subject_rows": sr, "session_rows": sess,
+                            "marks_rows": mr, "monthly": monthly})
+                    send_defaulter_family_report(email, members[0].get("parent_name"), children)
+                sent_emails += 1
+            except Exception as e:
+                failed_emails += 1
+                st.warning(f"{email}: {e}")
+            bar.progress(i / len(groups))
+        return sent_emails, failed_emails, skipped
+
     st.divider()
     b1, b2 = st.columns(2)
     with b1:
-        if st.button(f"📧 Send to selected ({len(chosen)})", type="primary",
-                     disabled=chosen.empty, key=f"{key}_sel"):
-            ok = fail = 0
-            bar = st.progress(0.0)
-            for i, (_, r) in enumerate(chosen.iterrows(), 1):
-                good, err = _send(r)
-                ok += good; fail += (not good)
-                if not good:
-                    st.warning(f"{r['name']}: {err}")
-                bar.progress(i / len(chosen))
-            st.success(f"Sent: {ok}, Failed: {fail}")
+        if st.button(f"📧 Email each parent (one email per family) · {len(chosen)} student(s)",
+                     type="primary", disabled=chosen.empty, key=f"{key}_sel"):
+            sent_n, failed_n, skipped_n = _send_grouped(chosen)
+            st.success(f"Emails sent: {sent_n}, failed: {failed_n}, skipped (no address): {skipped_n}. "
+                       "A parent with several children received one email.")
     with b2:
         pick = st.selectbox("Or send to one student", summ["name"].tolist(), key=f"{key}_one")
-        if st.button("📧 Send to this parent", key=f"{key}_onebtn"):
+        if st.button("📧 Email this parent", key=f"{key}_onebtn"):
             row = summ[summ["name"] == pick].iloc[0]
             good, err = _send(row)
             st.success(f"Email sent to {row['parent_email']}") if good else st.error(err)

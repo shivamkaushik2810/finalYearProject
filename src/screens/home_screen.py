@@ -37,4 +37,18 @@ def home_screen():
 
     # The admin link is not shown here. Admins use the private route (ADMIN_ROUTE_KEY).
 
+    # Admin entry for testing. Hide before deployment: SHOW_ADMIN_LINK = false in secrets.
+    try:
+        _show_admin = st.secrets.get("SHOW_ADMIN_LINK", True)
+    except Exception:
+        _show_admin = True
+    if str(_show_admin).lower() not in ("false", "0", "no"):
+        st.markdown("<style>.st-key-home_admin{max-width:260px;margin:24px auto 0 auto;}"
+                    ".st-key-home_admin button{width:100%;}</style>", unsafe_allow_html=True)
+        with st.container(key="home_admin"):
+            if st.button("Admin login", type="secondary", icon=":material/admin_panel_settings:",
+                         width="stretch", key="home_admin_btn"):
+                st.session_state['login_type'] = 'admin'
+                st.rerun()
+
     footer_home()

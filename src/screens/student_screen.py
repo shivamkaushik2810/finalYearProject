@@ -23,6 +23,7 @@ from src.components.marks_management import show_student_marks
 from src.components.child_overview import render_child_overview, render_announcements
 from src.components.qr_session import student_qr_panel
 from src.components.timetable import render_timetable
+from src.components.published_timetable_ui import show_student_timetable
 from src.components.leave_ui import student_leave_tab
 from src.components.dialog_add_angles import add_angles_dialog
 from src.services.face_embeddings import all_embeddings
@@ -55,18 +56,20 @@ def student_dashboard():
         student_qr_panel(student_data, key_prefix='qr_top')
         st.divider()
 
-    tab_over, tab1, tab2, tab3, tab_leave = st.tabs(['🏠 Overview', '📚 My Subjects', '📋 My Attendance', '📝 My Marks', '📝 Leave'])
+    from src.components.student_portal_nav import student_sidebar, student_timetable_section
+    section = student_sidebar(student_data)
 
-    with tab_over:
+    if section == 'overview':
         student_qr_panel(student_data, key_prefix='qr_ov')
         st.divider()
         render_child_overview(student_id, viewer='student')
         st.divider()
         render_announcements(student_id, viewer='student')
         st.divider()
-        render_timetable(student_id)
+        show_student_timetable(student_data)
 
-    with tab1:
+
+    if section == 'subjects':
         c1, c2 = st.columns(2)
         with c1:
             st.header('Your Enrolled Subjects')
@@ -117,18 +120,25 @@ def student_dashboard():
                         total=stats['total'],
                     )
 
-    with tab2:
+
+    if section == 'attendance':
         show_student_attendance_list(student_id)
 
-    with tab3:
+
+    if section == 'marks':
         show_student_marks(student_id)
 
-    with tab_leave:
+
+    if section == 'leave':
         try:
             student_leave_tab(student_id)
         except Exception as e:
             print(f"Leave tab error: {type(e).__name__}")
             st.info("Leave requests are not available yet (database setup missing).")
+
+
+    if section == 'timetable':
+        student_timetable_section(student_data)
 
     from src.components.feedback import show_feedback_section
     show_feedback_section("student", student_id, student_data["name"])

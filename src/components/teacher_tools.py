@@ -17,7 +17,8 @@ def _pick(subjects, key):
     if not subjects:
         st.info("Create a subject first.")
         return None
-    opts = {f"{s['name']} - {s['subject_code']}": str(s['subject_id']) for s in subjects}
+    opts = {f"{s['name']} - {s['subject_code']} ({str(s['subject_id'])[:8]})": str(s['subject_id'])
+            for s in subjects}
     return opts[st.selectbox("Subject", list(opts.keys()), key=key)]
 
 

@@ -60,6 +60,8 @@ TEACHER_NAV = {
     "marks": ":material/grade: Marks",
     "ai_insights": ":material/smart_toy: Insights",
     "analytics": ":material/monitoring: Analytics",
+    "my_timetable": ":material/calendar_month: My timetable",
+    "absences": ":material/event_busy: Leave & absences",
     "more_tools": ":material/build: Tools",
 }
 
@@ -126,6 +128,12 @@ def teacher_dashboard():
         teacher_tab_ai_insights(subjects, teacher_id)
     elif current == "analytics":
         teacher_analytics_tab(subjects, teacher_id)
+    elif current == "my_timetable":
+        from src.components.published_timetable_ui import show_my_timetable
+        show_my_timetable(teacher_id)
+    elif current == "absences":
+        from src.components.teacher_absence_ui import show_my_absences
+        show_my_absences(teacher_id)
     elif current == "more_tools":
         try:
             from src.components.teacher_tools import teacher_more_tools

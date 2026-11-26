@@ -10,6 +10,9 @@ from src.ui.admin_theme import (
 from src.components.footer import footer_dashboard
 from src.components.timetable import admin_timetable_manager
 from src.components.student_analytics_ui import student_analytics_tab
+from src.components.timetable_editor_ui import show_timetable_editor
+from src.components.faculty_absence_ui import show_faculty_absences
+from src.components.substitution_dashboard_ui import show_substitution_dashboard
 from src.components.term_manager import admin_term_manager
 from src.components.section_analytics import show_section_analytics
 from src.components.teacher_session_history import show_teacher_session_history
@@ -19,7 +22,6 @@ from src.components.admin_accounts import admin_accounts_panel
 from src.components.admin_audit import admin_audit_panel
 from src.components.admin_system import admin_system_panel
 from src.components.admin_exports import admin_exports_panel
-from src.components.defaulter_email import defaulter_email_panel
 from src.database.config import supabase
 from src.database.db import admin_login, get_teachers_by_status, set_teacher_status
 from src.services.report_export import df_pdf
@@ -30,6 +32,26 @@ def admin_screen():
     style_background_dashboard()
     style_base_layout()
     inject_admin_theme()
+    st.markdown(
+        "<style>"
+        "[data-testid='stToolbar'],[data-testid='stToolbarActions'],[data-testid='stHeader'] {visibility:visible!important;display:flex!important;}"
+        "header[data-testid='stHeader']{background:transparent!important;}"
+        "[data-testid='stSidebarCollapsedControl'],[data-testid='stExpandSidebarButton'],"
+        "[data-testid='collapsedControl'],[data-testid='stSidebarCollapseButton'] button{"
+        "visibility:visible!important;display:flex!important;opacity:1!important;z-index:999999!important;"
+        "background:#FFFFFF!important;border:1px solid #CBD5E1!important;border-radius:8px!important;}"
+        "[data-testid='stSidebarCollapsedControl'] svg,[data-testid='stExpandSidebarButton'] svg,"
+        "[data-testid='collapsedControl'] svg,[data-testid='stSidebarCollapseButton'] svg{fill:#0B1220!important;color:#0B1220!important;}"
+        "</style>", unsafe_allow_html=True)
+    st.markdown("<style>"
+                "[data-testid='stSidebarCollapsedControl'],[data-testid='collapsedControl'],"
+                "[data-testid='stSidebarCollapseButton'] button{visibility:visible!important;"
+                "display:flex!important;opacity:1!important;z-index:999999!important;"
+                "background:#FFFFFF!important;color:#0B1220!important;"
+                "border:1px solid #CBD5E1!important;border-radius:8px!important;}"
+                "[data-testid='stSidebarCollapsedControl'] svg,[data-testid='collapsedControl'] svg,"
+                "[data-testid='stSidebarCollapseButton'] svg{fill:#0B1220!important;color:#0B1220!important;}"
+                "</style>", unsafe_allow_html=True)
     if "admin_data" in st.session_state:
         admin_dashboard()
     else:
@@ -251,7 +273,8 @@ def _overview_tab():
         if len(ddf) > 500:
             st.caption("Showing the 500 lowest. The CSV and PDF downloads contain all of them.")
         _download_pair(ddf, "Defaulters Report", f"Below {thr}% - {scope}", "defaulters", "adm_def")
-        defaulter_email_panel(dmeta, thr)
+        st.info("To email parents, use the Defaulter emails page in the menu. "
+                "It sends from one place, so a parent is not emailed twice.")
 
 
 # ───────────────────────── shell ─────────────────────────
@@ -295,8 +318,12 @@ def admin_dashboard():
         _approvals_tab()
     elif choice == "accounts":
         admin_accounts_panel()
-    elif choice == "timetable":
-        admin_timetable_manager()
+    elif choice == "timetable_editor":
+        show_timetable_editor()
+    elif choice == "absences":
+        show_faculty_absences()
+    elif choice == "substitutions":
+        show_substitution_dashboard()
     elif choice == "terms":
         admin_term_manager()
     elif choice == "students":
