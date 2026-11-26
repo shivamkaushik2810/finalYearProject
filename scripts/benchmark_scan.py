@@ -3,7 +3,7 @@
 Usage (from project root):
   SCAN_CONCURRENCY=2 python scripts/benchmark_scan.py PHOTO_DIR --workers 2 --reps 3
 
---workers 0 = sequential. Use only test photos you are allowed to use.
+--workers 0 means sequential. Use only test photos you are allowed to use.
 Output contains timings, counts and match/mismatch totals. No IDs are printed or saved.
 """
 import argparse
@@ -16,6 +16,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# Must be set before face_pipeline is imported (it reads the TTL at import time).
+os.environ.setdefault("KNOWN_FACES_TTL", "3600")
 
 SUPPORTED = {".jpg", ".jpeg", ".png"}
 
@@ -41,17 +44,19 @@ def rss_mb():
 
 
 def load_images(folder: Path):
-    """Yield (name, RGB array) one at a time. Corrupt files are reported and skipped."""
+    """Return a list of (name, RGB array). Corrupt files are reported and skipped."""
     import numpy as np
     from PIL import Image
+    out = []
     for path in sorted(folder.iterdir()):
         if path.suffix.lower() not in SUPPORTED:
             continue
         try:
             with Image.open(path) as im:
-                yield path.name, np.array(im.convert("RGB"))
+                out.append((path.name, np.array(im.convert("RGB"))))
         except Exception as exc:
             print(f"  skipped unreadable image ({type(exc).__name__})")
+    return out
 
 
 def identities(arr):
@@ -108,15 +113,15 @@ def main():
     except ImportError as exc:
         fail(f"missing dependency: {exc.name}. Activate the project venv.")
 
-    scan_conc = int(os.environ.get("SCAN_CONCURRENCY", "2"))
-    if args.workers > scan_conc:
-        fail(f"--workers {args.workers} exceeds SCAN_CONCURRENCY={scan_conc}. "
-             f"Re-run with SCAN_CONCURRENCY={args.workers} or fewer workers.")
+    try:
+        scan_conc = int(os.environ.get("SCAN_CONCURRENCY", "2"))
+        if scan_conc < 1:
+            fail("SCAN_CONCURRENCY must be at least 1.")
+    except ValueError:
+        fail("SCAN_CONCURRENCY must be a positive integer.")
 
-    # Cache must not refresh between runs, or sequential and parallel compare different data.
-    os.environ.setdefault("KNOWN_FACES_TTL", "3600")
 
-    images = list(load_images(args.folder))
+    images = load_images(args.folder)
     if not images:
         fail("no readable .jpg/.jpeg/.png images in that folder")
 
@@ -124,15 +129,15 @@ def main():
     identities(images[0][1])  # warm-up: model and known-face cache
     warm = rss_mb()
 
-    seq_ids, seq_times, seq_errors = None, [], 0
-    par_runs, par_errors = [], 0
     mode = "sequential" if args.workers == 0 else f"parallel-{args.workers}"
-    max_in_flight = args.max_in_flight or args.workers * 2
+    max_in_flight = args.max_in_flight or max(1, args.workers) * 2
 
     print("SnapClass Face Recognition Benchmark")
     print(f"  Mode: {mode}  Workers: {args.workers}  Max in-flight: {max_in_flight}")
     print(f"  Images: {len(images)}  Repetitions: {args.reps}  SCAN_CONCURRENCY: {scan_conc}")
 
+    seq_ids, seq_times, seq_errors = None, [], 0
+    par_runs, par_errors = [], 0
     run_times, peak = [], warm
     cpu_before = time.process_time()
     wall_before = time.perf_counter()
@@ -177,7 +182,6 @@ def main():
                "peak_rss_mb": peak and round(peak, 1)}
 
     if args.workers > 0:
-        # Sequential reference for consistency: one extra sequential pass.
         ref_ids, _, _ = run_sequential(images)
         mismatches = 0
         for run in par_runs:

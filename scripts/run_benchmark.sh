@@ -31,7 +31,7 @@ if [[ ! -f "src/pipelines/face_pipeline.py" ]]; then
     exit 1
 fi
 
-export SCAN_CONCURRENCY=4
+export SCAN_CONCURRENCY=1
 
 echo "=================================="
 echo "SNAPCLASS FACE SCAN BENCHMARK"
